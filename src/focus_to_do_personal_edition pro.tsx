@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { loadUserData, saveUserData } from './cloudSync';  
 import {
   Search, Sun, Calendar, CalendarDays, CheckCircle2, Inbox, Plus, Play, Pause,
   Volume2, VolumeX, Maximize2, Minimize2, BarChart3,
@@ -525,9 +526,11 @@ const DEFAULT_SETTINGS = {
   focusWallpaper: 'forest',
 };
 
-export default function App() {
+export default function App({ user, onLogout }) {
   const todayStr = getDateStr(0);
   const weekEndStr = getDateStr(7);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudHasData, setCloudHasData] = useState(false);
 
   // One-time migration to wipe legacy demo data so the app starts completely fresh
   useState(() => {
@@ -800,6 +803,51 @@ export default function App() {
   const [isAddFolderOpen, setIsAddFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
+
+  // Load this user's data from Supabase
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudData() {
+      if (!user?.id) return;
+
+      try {
+        const cloudData = await loadUserData(user.id);
+        if (cancelled) return;
+setCloudReady(true);
+setCloudHasData(Boolean(cloudData));
+
+        // If this account has no cloud data yet,
+        // keep the existing local data unchanged.
+        if (!cloudData || cancelled) return;
+
+        setProjects(cloudData.projects ?? INITIAL_PROJECTS);
+        setTasks(cloudData.tasks ?? createInitialTasks());
+        setSessions(cloudData.sessions ?? createInitialSessions());
+        setDeletedHistory(
+          cloudData.deletedHistory ?? { projects: [], tasks: [] }
+        );
+        setSettings({
+          ...DEFAULT_SETTINGS,
+          ...(cloudData.settings ?? {}),
+        });
+        setDateGoals(cloudData.dateGoals ?? {});
+        setTabGoals(cloudData.tabGoals ?? {});
+        setTags(cloudData.tags ?? []);
+        setFolders(cloudData.folders ?? []);
+      } catch (error) {
+        console.error('Cloud data loading failed:', error);
+      }
+    }
+
+    loadCloudData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+
   useEffect(() => {
     try {
       localStorage.setItem('ftd_tags_v2', JSON.stringify(tags));
@@ -823,6 +871,42 @@ export default function App() {
       localStorage.setItem('ftd_date_goals_v2', JSON.stringify(dateGoals));
     } catch (e) {}
   }, [dateGoals]);
+
+  // Automatically sync changes to this user's cloud account
+  useEffect(() => {
+    if (!user?.id || !cloudReady || !cloudHasData) return;
+
+    const timeout = setTimeout(() => {
+      saveUserData(user.id, {
+        projects,
+        tasks,
+        sessions,
+        deletedHistory,
+        settings,
+        dateGoals,
+        tabGoals,
+        tags,
+        folders,
+      }).catch((error) => {
+        console.error('Cloud save failed:', error);
+      });
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [
+    user?.id,
+    cloudReady,
+    cloudHasData,
+    projects,
+    tasks,
+    sessions,
+    deletedHistory,
+    settings,
+    dateGoals,
+    tabGoals,
+    tags,
+    folders,
+  ]);
 
   // Live 1-second clock tick for the 24-hour Study Trend live time indicator
   useEffect(() => {
