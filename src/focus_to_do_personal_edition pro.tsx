@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { loadUserData, saveUserData } from './cloudSync.js';
+import {
+  checkForAppUpdate,
+  downloadAndInstallUpdate,
+  addUpdateDownloadListener
+} from './appUpdater.js';
 import {
   Search, Sun, Calendar, CalendarDays, CheckCircle2, Inbox, Plus, Play, Pause,
   Volume2, VolumeX, Maximize2, Minimize2, BarChart3,
@@ -121,7 +126,7 @@ class SoundEngine {
         return;
       }
 
-      // Default — Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
+      // Default Ã¢â‚¬â€ Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
       const carrier = this.ctx.createOscillator();
       const mod = this.ctx.createOscillator();
       const modGain = this.ctx.createGain();
@@ -532,6 +537,11 @@ export default function App({ user, onLogout }) {
   const weekEndStr = getDateStr(7);
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudHasData, setCloudHasData] = useState(false);
+  // Online application update state
+  const [availableUpdate, setAvailableUpdate] = useState(null);
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState('');
 
   // One-time migration to wipe legacy demo data so the app starts completely fresh
   useState(() => {
@@ -584,7 +594,7 @@ export default function App({ user, onLogout }) {
 
   const [deletedHistory, setDeletedHistory] = useState(() => {
     try {
-      const saved = localStorage.getItem(userStorageKey(userStorageKey('ftd_settings_v2')));
+      const saved = localStorage.getItem(userStorageKey('ftd_deleted_history_v2'));
       return saved ? JSON.parse(saved) : { projects: [], tasks: [] };
     } catch (e) {
       return { projects: [], tasks: [] };
@@ -593,7 +603,7 @@ export default function App({ user, onLogout }) {
 
   const [settings, setSettings] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_settings_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_settings_v2'));
       return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
     } catch (e) {
       return DEFAULT_SETTINGS;
@@ -861,7 +871,12 @@ useEffect(() => {
       setCloudReady(true);
 
     } catch (error) {
-      console.error('Cloud data loading failed:', error);
+      console.warn('Cloud data unavailable. Continuing with local data:', error);
+
+      if (!cancelled) {
+        setCloudHasData(false);
+        setCloudReady(true);
+      }
     }
   }
 
@@ -999,6 +1014,51 @@ useEffect(() => {
     toastTimeoutRef.current = setTimeout(() => setToastMsg(''), 3200);
   }, []);
 
+  // Automatic online update checks
+  useEffect(() => {
+    let active = true;
+    let progressHandle = null;
+
+    const checkUpdate = async () => {
+      if (!navigator.onLine) return;
+
+      try {
+        const update = await checkForAppUpdate();
+
+        if (active && update) {
+          setAvailableUpdate(update);
+        }
+      } catch (error) {
+        console.warn('FocusToDoPro update check failed:', error);
+      }
+    };
+
+    checkUpdate();
+
+    const intervalId = setInterval(checkUpdate, 6 * 60 * 60 * 1000);
+    window.addEventListener('online', checkUpdate);
+
+    addUpdateDownloadListener((event) => {
+      if (active) {
+        setUpdateProgress(Number(event.progress) || 0);
+      }
+    }).then((handle) => {
+      if (active) {
+        progressHandle = handle;
+      } else {
+        handle.remove();
+      }
+    }).catch((error) => {
+      console.warn('Update progress listener failed:', error);
+    });
+
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+      window.removeEventListener('online', checkUpdate);
+      progressHandle?.remove();
+    };
+  }, []);
   // Only sessions >= 15 minutes affect statistics, trends, and reports
   const validSessions = useMemo(
     () => sessions.filter((s) => (Number(s.durationMins) || 0) >= 15),
@@ -1018,7 +1078,7 @@ useEffect(() => {
         return {
           tier: 'uranium',
           label: 'Uranium',
-          range: '12h – 15h',
+          range: '12h Ã¢â‚¬â€œ 15h',
           color: '#22c55e',
           bg: 'rgba(34, 197, 94, 0.18)',
           border: '#22c55e',
@@ -1028,7 +1088,7 @@ useEffect(() => {
         return {
           tier: 'gold',
           label: 'Gold',
-          range: '8h – 12h',
+          range: '8h Ã¢â‚¬â€œ 12h',
           color: '#eab308',
           bg: 'rgba(234, 179, 8, 0.18)',
           border: '#eab308',
@@ -1038,7 +1098,7 @@ useEffect(() => {
         return {
           tier: 'silver',
           label: 'Silver',
-          range: '5h – 8h',
+          range: '5h Ã¢â‚¬â€œ 8h',
           color: '#9ca3af',
           bg: 'rgba(156, 163, 175, 0.18)',
           border: '#9ca3af',
@@ -1048,7 +1108,7 @@ useEffect(() => {
         return {
           tier: 'bronze',
           label: 'Bronze',
-          range: '2h – 5h',
+          range: '2h Ã¢â‚¬â€œ 5h',
           color: '#ef5350',
           bg: 'rgba(239, 83, 80, 0.18)',
           border: '#ef5350',
@@ -1155,7 +1215,7 @@ useEffect(() => {
     const periodPeriodTitle =
       timesCompletedOffset === 0
         ? 'Current Period'
-        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} • ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
+        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} Ã¢â‚¬Â¢ ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
 
     const weekQualDates = qualifiedDates.filter((d) => d >= wkStartStr && d <= wkEndStr);
     const monthQualDates = qualifiedDates.filter((d) => d.startsWith(monthPrefix));
@@ -1221,25 +1281,25 @@ useEffect(() => {
     const perTypeStreaks = [
       {
         id: 'bronze',
-        label: 'Bronze (2h–5h)',
+        label: 'Bronze (2hÃ¢â‚¬â€œ5h)',
         color: '#ef5350',
         ...computeTierStreakStats((m) => m >= 120 && m < 300),
       },
       {
         id: 'silver',
-        label: 'Silver (5h–8h)',
+        label: 'Silver (5hÃ¢â‚¬â€œ8h)',
         color: '#9ca3af',
         ...computeTierStreakStats((m) => m >= 300 && m < 480),
       },
       {
         id: 'gold',
-        label: 'Gold (8h–12h)',
+        label: 'Gold (8hÃ¢â‚¬â€œ12h)',
         color: '#eab308',
         ...computeTierStreakStats((m) => m >= 480 && m < 720),
       },
       {
         id: 'uranium',
-        label: 'Uranium (12h–15h)',
+        label: 'Uranium (12hÃ¢â‚¬â€œ15h)',
         color: '#22c55e',
         ...computeTierStreakStats((m) => m >= 720),
       },
@@ -2046,7 +2106,7 @@ useEffect(() => {
     const projObj = targetProjectId ? projects.find((p) => p.id === targetProjectId) : null;
     showToast(
       hasReminder
-        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} • ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
+        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} Ã¢â‚¬Â¢ ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
         : projObj
         ? `Added "${trimmed}" to ${projObj.name}`
         : `Added task "${trimmed}"`
@@ -2199,6 +2259,31 @@ useEffect(() => {
     );
   };
 
+  const handleSaveEditProject = (e) => {
+    e.preventDefault();
+    if (!editingProject) return;
+
+    const trimmed = editingProject.name.trim();
+    if (!trimmed) return;
+
+    const updatedProject = {
+      ...editingProject,
+      name: trimmed,
+      reminderTime:
+        editingProject.reminderType !== 'none'
+          ? editingProject.reminderTime || ''
+          : '',
+    };
+
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === editingProject.id ? updatedProject : project
+      )
+    );
+
+    setEditingProject(null);
+    showToast(`Project "${trimmed}" updated`);
+  };
   const handleConfirmToggleProjectActive = () => {
     if (!projectStatusConfirm) return;
     const { id, name, nextInactive } = projectStatusConfirm;
@@ -2756,7 +2841,7 @@ useEffect(() => {
                       className="w-36 text-center bg-black/40 border border-[#ef5350] rounded-xl text-4xl sm:text-5xl font-light text-white py-1.5 focus:outline-none"
                     />
                     <span className="text-[11px] text-gray-300 mt-1.5">
-                      Enter 1 – 480 mins
+                      Enter 1 Ã¢â‚¬â€œ 480 mins
                     </span>
                   </form>
                 ) : (
@@ -2769,7 +2854,7 @@ useEffect(() => {
                     }}
                     title={
                       timerStatus === 'idle' && timerMode === 'countdown'
-                        ? 'Scroll mouse wheel or click to set 1 – 480 mins'
+                        ? 'Scroll mouse wheel or click to set 1 Ã¢â‚¬â€œ 480 mins'
                         : ''
                     }
                     className="flex flex-col items-center group"
@@ -4477,7 +4562,7 @@ useEffect(() => {
                     isHighlight: offsetDays === 0,
                   });
                 }
-                periodRangeBadge = `${trendPoints[0]?.fullTitle} – ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
+                periodRangeBadge = `${trendPoints[0]?.fullTitle} Ã¢â‚¬â€œ ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
               } else if (studyTrendTab === 'Weekly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4506,7 +4591,7 @@ useEffect(() => {
                 }
                 const wkEnd = new Date(weekMonday);
                 wkEnd.setDate(weekMonday.getDate() + 6);
-                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} – ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
+                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} Ã¢â‚¬â€œ ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
               } else if (studyTrendTab === 'Monthly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4557,7 +4642,7 @@ useEffect(() => {
                   ...trendPoints.map((p) => Math.ceil(p.mins / 60))
                 );
                 fixedMaxAxisHours = Math.max(16, Math.ceil(maxMonthHours / 8) * 8);
-                periodRangeBadge = `Year ${targetYear} (Jan – Dec)`;
+                periodRangeBadge = `Year ${targetYear} (Jan Ã¢â‚¬â€œ Dec)`;
               }
 
               const yTicks = Array.from({ length: 9 }, (_, idx) =>
@@ -6152,9 +6237,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[10px] text-gray-400">
                             {t.projectName}
-                            {t.dueDate ? ` • Date: ${t.dueDate}` : ''}
+                            {t.dueDate ? ` Ã¢â‚¬Â¢ Date: ${t.dueDate}` : ''}
                             {t.recordedMins > 0
-                              ? ` • Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` Ã¢â‚¬Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6245,9 +6330,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[11px] text-gray-400">
                             Project: {t.projectName}
-                            {t.archivedAt ? ` • Archived on ${t.archivedAt}` : ''}
+                            {t.archivedAt ? ` Ã¢â‚¬Â¢ Archived on ${t.archivedAt}` : ''}
                             {t.recordedMins > 0
-                              ? ` • Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` Ã¢â‚¬Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6628,9 +6713,9 @@ useEffect(() => {
 
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         setIsProfileMenuOpen(false);
-                        showToast(`Signed in locally as ${settings.username}`);
+                        await onLogout();
                       }}
                       className="w-full text-left px-4 py-2 text-gray-100 hover:bg-white/10 transition"
                     >
@@ -7451,7 +7536,7 @@ useEffect(() => {
                                 {formatHoursMins(focusMins).text}{' '}
                                 <span className="font-normal opacity-90">
                                   ({isWeekTab
-                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d • ${pct}%`
+                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d Ã¢â‚¬Â¢ ${pct}%`
                                     : `${pct}%`})
                                 </span>
                               </span>
@@ -8045,10 +8130,10 @@ useEffect(() => {
                     onChange={(e) => setNewTaskTitle(e.target.value)}
                     placeholder={
                       isTomorrowTab
-                        ? `Plan a task in "Tomorrow", press 「Enter」 to save`
+                        ? `Plan a task in "Tomorrow", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
                         : isPlannedTab
-                        ? `Plan a task in "Planned", press 「Enter」 to save`
-                        : `Add a task to "${activeViewMeta.title}", press 「Enter」 to save`
+                        ? `Plan a task in "Planned", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
+                        : `Add a task to "${activeViewMeta.title}", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
                     }
                     className="flex-1 min-w-[160px] bg-transparent text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none"
                   />
@@ -8114,7 +8199,7 @@ useEffect(() => {
                       <Clock className="w-3.5 h-3.5" />
                       <span>
                         {newTaskReminderTime
-                          ? `Tomorrow • ${newTaskReminderTime}`
+                          ? `Tomorrow Ã¢â‚¬Â¢ ${newTaskReminderTime}`
                           : 'Tomorrow'}
                       </span>
                     </button>
@@ -8161,7 +8246,7 @@ useEffect(() => {
                         <Clock className="w-3.5 h-3.5" />
                         <span>
                           {newTaskDue === 'today' && newTaskReminderTime
-                            ? `Today • ${newTaskReminderTime}`
+                            ? `Today Ã¢â‚¬Â¢ ${newTaskReminderTime}`
                             : 'Today'}
                         </span>
                       </button>
@@ -10246,7 +10331,7 @@ useEffect(() => {
                                   ti.checked ? 'line-through text-gray-500' : 'text-gray-300'
                                 }`}
                               >
-                                <span>{ti.checked ? '☑' : '☐'}</span>
+                                <span>{ti.checked ? 'Ã¢Ëœâ€˜' : 'Ã¢ËœÂ'}</span>
                                 <span className="truncate">{ti.text}</span>
                               </div>
                             ))}
@@ -10630,7 +10715,7 @@ useEffect(() => {
           {
             id: 'bronze',
             name: 'Bronze Medal',
-            rule: '2h – 5h in a day',
+            rule: '2h Ã¢â‚¬â€œ 5h in a day',
             count: streakAndAchievements.bronzeCount,
             color: '#ef5350',
             bg: 'rgba(239, 83, 80, 0.14)',
@@ -10638,7 +10723,7 @@ useEffect(() => {
           {
             id: 'silver',
             name: 'Silver Medal',
-            rule: '5h – 8h in a day',
+            rule: '5h Ã¢â‚¬â€œ 8h in a day',
             count: streakAndAchievements.silverCount,
             color: '#9ca3af',
             bg: 'rgba(156, 163, 175, 0.14)',
@@ -10646,7 +10731,7 @@ useEffect(() => {
           {
             id: 'gold',
             name: 'Gold Medal',
-            rule: '8h – 12h in a day',
+            rule: '8h Ã¢â‚¬â€œ 12h in a day',
             count: streakAndAchievements.goldCount,
             color: '#eab308',
             bg: 'rgba(234, 179, 8, 0.14)',
@@ -10654,7 +10739,7 @@ useEffect(() => {
           {
             id: 'uranium',
             name: 'Uranium Medal',
-            rule: '12h – 15h in a day',
+            rule: '12h Ã¢â‚¬â€œ 15h in a day',
             count: streakAndAchievements.uraniumCount,
             color: '#22c55e',
             bg: 'rgba(34, 197, 94, 0.14)',
@@ -10824,7 +10909,7 @@ useEffect(() => {
                               >
                                 <div
                                   title={`${d.dateStr}: ${formatHoursMins(d.mins).text}${
-                                    medal ? ` • ${medal.label} Medal (${medal.range})` : ''
+                                    medal ? ` Ã¢â‚¬Â¢ ${medal.label} Medal (${medal.range})` : ''
                                   }`}
                                   style={{
                                     borderColor: medal
@@ -10912,7 +10997,7 @@ useEffect(() => {
                             >
                               <div
                                 title={`${c.dateStr}: ${formatHoursMins(c.mins).text}${
-                                  medal ? ` • ${medal.label} Medal (${medal.range})` : ''
+                                  medal ? ` Ã¢â‚¬Â¢ ${medal.label} Medal (${medal.range})` : ''
                                 }`}
                                 style={{
                                   borderColor:
@@ -11132,7 +11217,7 @@ useEffect(() => {
                               soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
                             } else {
                               showToast(
-                                `Reach a ${daysTarget}-day continuous study streak (≥15m/day) to unlock!`
+                                `Reach a ${daysTarget}-day continuous study streak (Ã¢â€°Â¥15m/day) to unlock!`
                               );
                             }
                           }}
@@ -11153,7 +11238,7 @@ useEffect(() => {
                                   : 'bg-[#2b2b33] text-gray-400'
                               }`}
                             >
-                              ×{particularMedalTotal}
+                              Ãƒâ€”{particularMedalTotal}
                             </span>
 
                             {unlocked ? (
@@ -11284,6 +11369,101 @@ useEffect(() => {
         </div>
       )}
 
+      {/* FocusToDoPro Online Update Popup */}
+      {availableUpdate && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-[#18181b] border border-[#383842] shadow-2xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-11 h-11 rounded-xl bg-blue-500/15 flex items-center justify-center">
+                <RefreshCw className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">Update Available!</h2>
+                <p className="text-xs text-gray-400">A new FocusToDoPro version is ready.</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-[#222228] p-3 mb-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Current version</span>
+                <span className="text-gray-200">{availableUpdate.currentVersion}</span>
+              </div>
+              <div className="flex justify-between text-sm mt-2">
+                <span className="text-gray-400">Latest version</span>
+                <span className="text-blue-400 font-semibold">{availableUpdate.versionName}</span>
+              </div>
+            </div>
+
+            {availableUpdate.releaseNotes && (
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-gray-300 mb-2">WHAT'S NEW</p>
+                <p className="text-sm text-gray-400 whitespace-pre-line">
+                  {availableUpdate.releaseNotes}
+                </p>
+              </div>
+            )}
+
+            {updateBusy && (
+              <div className="mb-4">
+                <div className="flex justify-between text-xs text-gray-400 mb-2">
+                  <span>Downloading update...</span>
+                  <span>{updateProgress}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-[#33333b] overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: updateProgress + '%' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {updateMessage && (
+              <p className="text-xs text-blue-300 mb-3">{updateMessage}</p>
+            )}
+
+            <button
+              type="button"
+              disabled={updateBusy}
+              onClick={async () => {
+                setUpdateBusy(true);
+                setUpdateProgress(0);
+                setUpdateMessage('');
+
+                try {
+                  const result = await downloadAndInstallUpdate(availableUpdate);
+
+                  if (result?.permissionRequired) {
+                    setUpdateMessage('Enable "Allow from this source" in Android settings, return here, and tap Install Update again.');
+                  } else {
+                    setUpdateMessage('Download complete. Follow the Android installer instructions to finish updating.');
+                  }
+                } catch (error) {
+                  setUpdateMessage(error?.message || 'Update failed. Please try again.');
+                } finally {
+                  setUpdateBusy(false);
+                }
+              }}
+              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-sm flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              {updateBusy ? 'Downloading...' : 'Download & Install Update'}
+            </button>
+
+            <button
+              type="button"
+              disabled={updateBusy}
+              onClick={() => {
+                setAvailableUpdate(null);
+                setUpdateMessage('');
+              }}
+              className="w-full py-2.5 mt-2 rounded-xl text-gray-400 hover:text-white text-sm disabled:opacity-50"
+            >
+              Remind Me Later
+            </button>
+          </div>
+        </div>
+      )}
       {/* Non-intrusive Toast Notification */}
       {toastMsg && (
         <div className="fixed bottom-20 right-6 z-50 px-4 py-2.5 rounded-xl bg-[#242429] border border-[#383842] text-xs text-white shadow-2xl">
@@ -11293,4 +11473,7 @@ useEffect(() => {
     </div>
   );
 }
+
+
+
 

@@ -1,0 +1,7 @@
+﻿{
+    "versionCode":  2,
+    "versionName":  "1.1",
+    "apkUrl":  "https://focustodopro.vercel.app/updates/focustodopro.apk",
+    "sha256":  "0B29D2F89A3E0CE6E0ABDE4BA67A23A14CAA92009FDE4B7C8990C33E3EFA9777",
+    "releaseNotes":  "Online app updates enabled with bug fixes and improvements."
+}
