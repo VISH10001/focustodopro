@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { loadUserData, saveUserData } from './cloudsync';
+import { loadUserData, saveUserData } from './cloudSync.js';
 import {
   Search, Sun, Calendar, CalendarDays, CheckCircle2, Inbox, Plus, Play, Pause,
   Volume2, VolumeX, Maximize2, Minimize2, BarChart3,
@@ -527,6 +527,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function App({ user, onLogout }) {
+  const userStorageKey = (key) => `${key}_${user?.id ?? 'guest'}`;
   const todayStr = getDateStr(0);
   const weekEndStr = getDateStr(7);
   const [cloudReady, setCloudReady] = useState(false);
@@ -556,7 +557,7 @@ export default function App({ user, onLogout }) {
   // Persistent State in localStorage
   const [projects, setProjects] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_projects_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_projects_v2'));
       return saved ? JSON.parse(saved) : INITIAL_PROJECTS;
     } catch (e) {
       return INITIAL_PROJECTS;
@@ -565,7 +566,7 @@ export default function App({ user, onLogout }) {
 
   const [tasks, setTasks] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_tasks_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_tasks_v2'));
       return saved ? JSON.parse(saved) : createInitialTasks();
     } catch (e) {
       return createInitialTasks();
@@ -574,7 +575,7 @@ export default function App({ user, onLogout }) {
 
   const [sessions, setSessions] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_sessions_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_sessions_v2'));
       return saved ? JSON.parse(saved) : createInitialSessions();
     } catch (e) {
       return createInitialSessions();
@@ -583,7 +584,7 @@ export default function App({ user, onLogout }) {
 
   const [deletedHistory, setDeletedHistory] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_deleted_history_v2');
+      const saved = localStorage.getItem(userStorageKey(userStorageKey('ftd_settings_v2')));
       return saved ? JSON.parse(saved) : { projects: [], tasks: [] };
     } catch (e) {
       return { projects: [], tasks: [] };
@@ -601,31 +602,31 @@ export default function App({ user, onLogout }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_projects_v2', JSON.stringify(projects));
+    localStorage.setItem(userStorageKey('ftd_projects_v2'), JSON.stringify(projects));
     } catch (e) {}
   }, [projects]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_tasks_v2', JSON.stringify(tasks));
+      localStorage.setItem(userStorageKey('ftd_tasks_v2'), JSON.stringify(tasks));
     } catch (e) {}
   }, [tasks]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_sessions_v2', JSON.stringify(sessions));
+      localStorage.setItem(userStorageKey('ftd_sessions_v2'), JSON.stringify(sessions));
     } catch (e) {}
   }, [sessions]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_deleted_history_v2', JSON.stringify(deletedHistory));
+      localStorage.setItem(userStorageKey('ftd_deleted_history_v2'), JSON.stringify(deletedHistory));
     } catch (e) {}
   }, [deletedHistory]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_settings_v2', JSON.stringify(settings));
+      localStorage.setItem(userStorageKey('ftd_settings_v2'), JSON.stringify(settings));
     } catch (e) {}
   }, [settings]);
 
@@ -685,7 +686,7 @@ export default function App({ user, onLogout }) {
   const [futureTabOffsets, setFutureTabOffsets] = useState({ tomorrow: 0, planned: 0 });
   const [dateGoals, setDateGoals] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_date_goals_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_date_goals_v2'));
       return saved ? JSON.parse(saved) : {};
     } catch (e) {
       return {};
@@ -693,7 +694,7 @@ export default function App({ user, onLogout }) {
   });
   const [tabGoals, setTabGoals] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_tab_goals_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_tab_goals_v2'));
       return saved ? JSON.parse(saved) : {};
     } catch (e) {
       return {};
@@ -782,7 +783,7 @@ export default function App({ user, onLogout }) {
 
   const [tags, setTags] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_tags_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_tags_v2'));
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       return [];
@@ -793,7 +794,7 @@ export default function App({ user, onLogout }) {
 
   const [folders, setFolders] = useState(() => {
     try {
-      const saved = localStorage.getItem('ftd_folders_v2');
+      const saved = localStorage.getItem(userStorageKey('ftd_folders_v2'));
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       return [];
@@ -805,70 +806,96 @@ export default function App({ user, onLogout }) {
 
 
   // Load this user's data from Supabase
-  useEffect(() => {
-    let cancelled = false;
+  
 
-    async function loadCloudData() {
-      if (!user?.id) return;
+// Load this user's data from Supabase
+useEffect(() => {
+  let cancelled = false;
 
-      try {
-        const cloudData = await loadUserData(user.id);
-        if (cancelled) return;
-setCloudReady(true);
-setCloudHasData(Boolean(cloudData));
+  async function loadCloudData() {
+    if (!user?.id) return;
 
-        // If this account has no cloud data yet,
-        // keep the existing local data unchanged.
-        if (!cloudData || cancelled) return;
+    try {
+      const cloudData = await loadUserData(user.id);
 
-        setProjects(cloudData.projects ?? INITIAL_PROJECTS);
-        setTasks(cloudData.tasks ?? createInitialTasks());
-        setSessions(cloudData.sessions ?? createInitialSessions());
-        setDeletedHistory(
-          cloudData.deletedHistory ?? { projects: [], tasks: [] }
-        );
-        setSettings({
-          ...DEFAULT_SETTINGS,
-          ...(cloudData.settings ?? {}),
+      if (cancelled) return;
+
+      // First-time setup: create the user's initial cloud record
+      if (!cloudData) {
+        await saveUserData(user.id, {
+          projects,
+          tasks,
+          sessions,
+          deletedHistory,
+          settings,
+          dateGoals,
+          tabGoals,
+          tags,
+          folders,
         });
-        setDateGoals(cloudData.dateGoals ?? {});
-        setTabGoals(cloudData.tabGoals ?? {});
-        setTags(cloudData.tags ?? []);
-        setFolders(cloudData.folders ?? []);
-      } catch (error) {
-        console.error('Cloud data loading failed:', error);
+
+        if (cancelled) return;
+
+        setCloudHasData(true);
+        setCloudReady(true);
+        return;
       }
+
+      // Existing cloud data: load it into the application
+      setProjects(cloudData.projects ?? INITIAL_PROJECTS);
+      setTasks(cloudData.tasks ?? createInitialTasks());
+      setSessions(cloudData.sessions ?? createInitialSessions());
+      setDeletedHistory(
+        cloudData.deletedHistory ?? { projects: [], tasks: [] }
+      );
+      setSettings({
+        ...DEFAULT_SETTINGS,
+        ...(cloudData.settings ?? {}),
+      });
+      setDateGoals(cloudData.dateGoals ?? {});
+      setTabGoals(cloudData.tabGoals ?? {});
+      setTags(cloudData.tags ?? []);
+      setFolders(cloudData.folders ?? []);
+
+      setCloudHasData(true);
+      setCloudReady(true);
+
+    } catch (error) {
+      console.error('Cloud data loading failed:', error);
     }
+  }
 
-    loadCloudData();
+  loadCloudData();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+  return () => {
+    cancelled = true;
+  };
+}, [user?.id]);
+
+
 
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_tags_v2', JSON.stringify(tags));
+      localStorage.setItem(userStorageKey('ftd_tags_v2'), JSON.stringify(tags));
     } catch (e) {}
   }, [tags]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_folders_v2', JSON.stringify(folders));
+      localStorage.setItem(userStorageKey('ftd_folders_v2'), JSON.stringify(folders));
     } catch (e) {}
   }, [folders]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_tab_goals_v2', JSON.stringify(tabGoals));
+      localStorage.setItem(userStorageKey('ftd_tab_goals_v2'), JSON.stringify(tabGoals));
     } catch (e) {}
   }, [tabGoals]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('ftd_date_goals_v2', JSON.stringify(dateGoals));
+      localStorage.setItem(userStorageKey('ftd_date_goals_v2'), JSON.stringify(dateGoals));
     } catch (e) {}
   }, [dateGoals]);
 
@@ -2466,15 +2493,15 @@ setCloudHasData(Boolean(cloudData));
     setSelectedTaskId('');
     setActiveFilter('today');
     try {
-      localStorage.removeItem('ftd_projects_v2');
-      localStorage.removeItem('ftd_tasks_v2');
-      localStorage.removeItem('ftd_sessions_v2');
-      localStorage.removeItem('ftd_deleted_history_v2');
-      localStorage.removeItem('ftd_settings_v2');
-      localStorage.removeItem('ftd_tags_v2');
-      localStorage.removeItem('ftd_folders_v2');
-      localStorage.removeItem('ftd_tab_goals_v2');
-      localStorage.removeItem('ftd_date_goals_v2');
+      localStorage.removeItem(userStorageKey('ftd_projects_v2'));
+      localStorage.removeItem(userStorageKey('ftd_tasks_v2'));
+      localStorage.removeItem(userStorageKey('ftd_sessions_v2'));
+      localStorage.removeItem(userStorageKey('ftd_settings_v2'));
+    
+      localStorage.removeItem(userStorageKey('ftd_tags_v2'));
+      localStorage.removeItem(userStorageKey('ftd_folders_v2'));
+      localStorage.removeItem(userStorageKey('ftd_tab_goals_v2'));
+      localStorage.removeItem(userStorageKey('ftd_date_goals_v2'));
     } catch (e) {}
     showToast('All user data reset to a clean slate');
   };
@@ -11266,3 +11293,4 @@ setCloudHasData(Boolean(cloudData));
     </div>
   );
 }
+
