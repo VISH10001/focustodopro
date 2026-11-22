@@ -26,3 +26,15 @@ pnpm-debug.log*
 .vscode/
 .idea/
 .DS_Store
+
+# Electron generated files
+/dist-electron/
+/release/
+
+# Local backup folders and files
+/backup_before_*/
+*.backup*
+
+# Windows updater binaries (host separately)
+/public/updates/windows/*.exe
+/public/updates/windows/*.blockmap
