@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { loadUserData, saveUserData } from './cloudSync.js';
 import {
   checkForAppUpdate,
@@ -126,7 +126,7 @@ class SoundEngine {
         return;
       }
 
-      // Default Ã¢â‚¬â€ Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
+      // Default ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
       const carrier = this.ctx.createOscillator();
       const mod = this.ctx.createOscillator();
       const modGain = this.ctx.createGain();
@@ -583,6 +583,80 @@ export default function App({ user, onLogout }) {
     }
   });
 
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] =
+    useState(false);
+
+
+  const [isNotificationHistoryOpen, setIsNotificationHistoryOpen] =
+    useState(false);
+
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem(
+        userStorageKey('ftd_notifications_v1')
+      );
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((notification) => notification && !notification.read)
+        : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const [notificationHistory, setNotificationHistory] = useState(() => {
+    try {
+      const savedHistory = localStorage.getItem(
+        userStorageKey('ftd_notification_history_v1')
+      );
+      const savedNotifications = localStorage.getItem(
+        userStorageKey('ftd_notifications_v1')
+      );
+
+      const history = savedHistory ? JSON.parse(savedHistory) : [];
+      const legacy = savedNotifications ? JSON.parse(savedNotifications) : [];
+      const archivedLegacy = Array.isArray(legacy)
+        ? legacy.filter((notification) => notification && notification.read)
+        : [];
+
+      const combined = [
+        ...(Array.isArray(history) ? history : []),
+        ...archivedLegacy,
+      ];
+
+      return combined
+        .filter((notification, index, all) =>
+          notification &&
+          all.findIndex((item) => item && item.id === notification.id) === index
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+        );
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Notification Center: Common notification creation engine
+  const addNotification = useCallback((title, message, type = 'info') => {
+    setNotifications((prev) => [
+      {
+        id: `notification-${Date.now()}`,
+        title,
+        message,
+        type,
+        createdAt: new Date().toISOString(),
+        read: false,
+      },
+      ...prev,
+    ]);
+  }, []);
+
+  const unreadNotificationCount = notifications.filter(
+    (notification) => !notification.read
+  ).length;
+
   const [sessions, setSessions] = useState(() => {
     try {
       const saved = localStorage.getItem(userStorageKey('ftd_sessions_v2'));
@@ -621,6 +695,27 @@ export default function App({ user, onLogout }) {
       localStorage.setItem(userStorageKey('ftd_tasks_v2'), JSON.stringify(tasks));
     } catch (e) {}
   }, [tasks]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        userStorageKey('ftd_notifications_v1'),
+        JSON.stringify(notifications)
+      );
+    } catch (e) {
+      console.error('Notification storage failed:', e);
+    }
+  }, [notifications]);
+  // Notification Center: Save archived notification history
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        userStorageKey('ftd_notification_history_v1'),
+        JSON.stringify(notificationHistory)
+      );
+    } catch (e) {
+      console.error('Notification history storage failed:', e);
+    }
+  }, [notificationHistory]);
 
   useEffect(() => {
     try {
@@ -963,6 +1058,12 @@ useEffect(() => {
   const [timerMode, setTimerMode] = useState('countdown'); // 'countdown' | 'stopwatch'
   const [timerStatus, setTimerStatus] = useState('idle'); // 'idle' | 'running' | 'paused' | 'break'
   const [secondsLeft, setSecondsLeft] = useState(() => settings.pomodoroLength * 60);
+  const secondsLeftRef = useRef(secondsLeft);
+  const timerCompletionHandledRef = useRef(false);
+
+  useEffect(() => {
+    secondsLeftRef.current = secondsLeft;
+  }, [secondsLeft]);
   const [elapsedStopwatchSecs, setElapsedStopwatchSecs] = useState(0);
   const [whiteNoise, setWhiteNoise] = useState('off');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1078,7 +1179,7 @@ useEffect(() => {
         return {
           tier: 'uranium',
           label: 'Uranium',
-          range: '12h Ã¢â‚¬â€œ 15h',
+          range: '12h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 15h',
           color: '#22c55e',
           bg: 'rgba(34, 197, 94, 0.18)',
           border: '#22c55e',
@@ -1088,7 +1189,7 @@ useEffect(() => {
         return {
           tier: 'gold',
           label: 'Gold',
-          range: '8h Ã¢â‚¬â€œ 12h',
+          range: '8h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 12h',
           color: '#eab308',
           bg: 'rgba(234, 179, 8, 0.18)',
           border: '#eab308',
@@ -1098,7 +1199,7 @@ useEffect(() => {
         return {
           tier: 'silver',
           label: 'Silver',
-          range: '5h Ã¢â‚¬â€œ 8h',
+          range: '5h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 8h',
           color: '#9ca3af',
           bg: 'rgba(156, 163, 175, 0.18)',
           border: '#9ca3af',
@@ -1108,7 +1209,7 @@ useEffect(() => {
         return {
           tier: 'bronze',
           label: 'Bronze',
-          range: '2h Ã¢â‚¬â€œ 5h',
+          range: '2h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 5h',
           color: '#ef5350',
           bg: 'rgba(239, 83, 80, 0.18)',
           border: '#ef5350',
@@ -1215,7 +1316,7 @@ useEffect(() => {
     const periodPeriodTitle =
       timesCompletedOffset === 0
         ? 'Current Period'
-        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} Ã¢â‚¬Â¢ ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
+        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
 
     const weekQualDates = qualifiedDates.filter((d) => d >= wkStartStr && d <= wkEndStr);
     const monthQualDates = qualifiedDates.filter((d) => d.startsWith(monthPrefix));
@@ -1281,25 +1382,25 @@ useEffect(() => {
     const perTypeStreaks = [
       {
         id: 'bronze',
-        label: 'Bronze (2hÃ¢â‚¬â€œ5h)',
+        label: 'Bronze (2hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ5h)',
         color: '#ef5350',
         ...computeTierStreakStats((m) => m >= 120 && m < 300),
       },
       {
         id: 'silver',
-        label: 'Silver (5hÃ¢â‚¬â€œ8h)',
+        label: 'Silver (5hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ8h)',
         color: '#9ca3af',
         ...computeTierStreakStats((m) => m >= 300 && m < 480),
       },
       {
         id: 'gold',
-        label: 'Gold (8hÃ¢â‚¬â€œ12h)',
+        label: 'Gold (8hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ12h)',
         color: '#eab308',
         ...computeTierStreakStats((m) => m >= 480 && m < 720),
       },
       {
         id: 'uranium',
-        label: 'Uranium (12hÃ¢â‚¬â€œ15h)',
+        label: 'Uranium (12hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ15h)',
         color: '#22c55e',
         ...computeTierStreakStats((m) => m >= 720),
       },
@@ -1436,25 +1537,66 @@ useEffect(() => {
         return;
       }
 
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          if (timerStatus === 'running') {
-            completePomodoroSession(settings.pomodoroLength, false);
-            soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
-            if (settings.disableBreak) {
-              setTimerStatus(settings.autoStartNext ? 'running' : 'idle');
-              return settings.pomodoroLength * 60;
-            }
-            setTimerStatus(settings.autoStartBreak ? 'break' : 'idle');
-            return settings.shortBreakLength * 60;
-          } else {
-            soundEngine.playAlarm(settings.breakAlarm || 'Marimba Chime');
+      const currentSeconds = secondsLeftRef.current;
+
+      if (currentSeconds <= 1) {
+        if (timerCompletionHandledRef.current) return;
+
+        // Prevent duplicate completion side effects.
+        timerCompletionHandledRef.current = true;
+
+        if (timerStatus === 'running') {
+          completePomodoroSession(settings.pomodoroLength, false);
+
+          const completedTaskForNotification = tasks.find(
+            (task) => task.id === selectedTaskId
+          );
+
+          addNotification(
+            'Focus Session Completed',
+            `${completedTaskForNotification ? completedTaskForNotification.title : 'Focus Session'} completed successfully (${settings.pomodoroLength} minutes).`,
+            'pomodoro'
+          );
+
+          soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
+
+          if (settings.disableBreak) {
+            const nextSeconds = settings.pomodoroLength * 60;
+            secondsLeftRef.current = nextSeconds;
+            setSecondsLeft(nextSeconds);
             setTimerStatus(settings.autoStartNext ? 'running' : 'idle');
-            return settings.pomodoroLength * 60;
+          } else {
+            const nextSeconds = settings.shortBreakLength * 60;
+            secondsLeftRef.current = nextSeconds;
+            setSecondsLeft(nextSeconds);
+            setTimerStatus(settings.autoStartBreak ? 'break' : 'idle');
           }
+        } else {
+          addNotification(
+            'Break Completed',
+            'Your break is over. Time to start your next focus session!',
+            'break'
+          );
+
+          soundEngine.playAlarm(settings.breakAlarm || 'Marimba Chime');
+
+          const nextSeconds = settings.pomodoroLength * 60;
+          secondsLeftRef.current = nextSeconds;
+          setSecondsLeft(nextSeconds);
+          setTimerStatus(settings.autoStartNext ? 'running' : 'idle');
         }
-        return prev - 1;
-      });
+
+        return;
+      }
+
+      // A new timer cycle is ready after its seconds have been reset.
+      if (timerCompletionHandledRef.current) {
+        timerCompletionHandledRef.current = false;
+      }
+
+      const nextSeconds = currentSeconds - 1;
+      secondsLeftRef.current = nextSeconds;
+      setSecondsLeft(nextSeconds);
     }, 1000);
 
     return () => clearInterval(interval);
@@ -1469,8 +1611,10 @@ useEffect(() => {
     settings.focusAlarm,
     settings.breakAlarm,
     completePomodoroSession,
+    tasks,
+    selectedTaskId,
+    addNotification,
   ]);
-
   // Scheduled Task Reminder & Alarm Checker
   useEffect(() => {
     const checkReminders = () => {
@@ -1492,6 +1636,7 @@ useEffect(() => {
             soundEngine.playTechClick('Quantum Sonar');
           }
           showToast(`Reminder: "${t.title}" (${curTime})`);
+          addNotification('Task Reminder', t.title + ' is due now (' + curTime + ').', 'reminder');
           setTasks((prev) =>
             prev.map((item) =>
               item.id === t.id ? { ...item, reminderTriggered: true } : item
@@ -1502,7 +1647,7 @@ useEffect(() => {
     };
     const timer = setInterval(checkReminders, 10000);
     return () => clearInterval(timer);
-  }, [tasks, settings.focusAlarm, settings.alarmSound, showToast]);
+  }, [tasks, settings.focusAlarm, settings.alarmSound, showToast, addNotification]);
 
   const updateFlexibleMinutes = (mins) => {
     const clamped = Math.max(1, Math.min(480, Math.round(mins)));
@@ -2106,7 +2251,7 @@ useEffect(() => {
     const projObj = targetProjectId ? projects.find((p) => p.id === targetProjectId) : null;
     showToast(
       hasReminder
-        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} Ã¢â‚¬Â¢ ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
+        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
         : projObj
         ? `Added "${trimmed}" to ${projObj.name}`
         : `Added task "${trimmed}"`
@@ -2841,7 +2986,7 @@ useEffect(() => {
                       className="w-36 text-center bg-black/40 border border-[#ef5350] rounded-xl text-4xl sm:text-5xl font-light text-white py-1.5 focus:outline-none"
                     />
                     <span className="text-[11px] text-gray-300 mt-1.5">
-                      Enter 1 Ã¢â‚¬â€œ 480 mins
+                      Enter 1 ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 480 mins
                     </span>
                   </form>
                 ) : (
@@ -2854,7 +2999,7 @@ useEffect(() => {
                     }}
                     title={
                       timerStatus === 'idle' && timerMode === 'countdown'
-                        ? 'Scroll mouse wheel or click to set 1 Ã¢â‚¬â€œ 480 mins'
+                        ? 'Scroll mouse wheel or click to set 1 ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 480 mins'
                         : ''
                     }
                     className="flex flex-col items-center group"
@@ -4562,7 +4707,7 @@ useEffect(() => {
                     isHighlight: offsetDays === 0,
                   });
                 }
-                periodRangeBadge = `${trendPoints[0]?.fullTitle} Ã¢â‚¬â€œ ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
+                periodRangeBadge = `${trendPoints[0]?.fullTitle} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
               } else if (studyTrendTab === 'Weekly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4591,7 +4736,7 @@ useEffect(() => {
                 }
                 const wkEnd = new Date(weekMonday);
                 wkEnd.setDate(weekMonday.getDate() + 6);
-                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} Ã¢â‚¬â€œ ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
+                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
               } else if (studyTrendTab === 'Monthly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4642,7 +4787,7 @@ useEffect(() => {
                   ...trendPoints.map((p) => Math.ceil(p.mins / 60))
                 );
                 fixedMaxAxisHours = Math.max(16, Math.ceil(maxMonthHours / 8) * 8);
-                periodRangeBadge = `Year ${targetYear} (Jan Ã¢â‚¬â€œ Dec)`;
+                periodRangeBadge = `Year ${targetYear} (Jan ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Dec)`;
               }
 
               const yTicks = Array.from({ length: 9 }, (_, idx) =>
@@ -6237,9 +6382,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[10px] text-gray-400">
                             {t.projectName}
-                            {t.dueDate ? ` Ã¢â‚¬Â¢ Date: ${t.dueDate}` : ''}
+                            {t.dueDate ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Date: ${t.dueDate}` : ''}
                             {t.recordedMins > 0
-                              ? ` Ã¢â‚¬Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6330,9 +6475,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[11px] text-gray-400">
                             Project: {t.projectName}
-                            {t.archivedAt ? ` Ã¢â‚¬Â¢ Archived on ${t.archivedAt}` : ''}
+                            {t.archivedAt ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Archived on ${t.archivedAt}` : ''}
                             {t.recordedMins > 0
-                              ? ` Ã¢â‚¬Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6581,11 +6726,16 @@ useEffect(() => {
           </button>
           <button
             type="button"
-            onClick={() => showToast('All study reminders are up to date')}
+            onClick={() => setIsNotificationCenterOpen((prev) => !prev)}
             title="Notifications"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
+            className="relative p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
           >
             <Bell className="w-4 h-4" />
+            {unreadNotificationCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -6601,7 +6751,163 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* Main Split Content: Left Sidebar + Right Task Workspace */}
+            {isNotificationCenterOpen && (
+        <div className={`fixed top-16 right-4 z-[100] w-[min(24rem,calc(100vw-2rem))] rounded-xl border shadow-2xl overflow-hidden ${
+          isAmoled ? 'bg-black border-[#333]' : 'bg-[#18181b] border-[#34343c]'
+        }`}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Notification Center</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {isNotificationHistoryOpen
+                  ? `${notificationHistory.length} history notifications`
+                  : `${unreadNotificationCount} unread notifications`}
+              </p>
+            </div>
+            <button type="button" onClick={() => setIsNotificationCenterOpen(false)}
+              className="text-gray-400 hover:text-white text-lg px-2" title="Close">
+              Ãƒâ€”
+            </button>
+          </div>
+
+          <div className="flex border-b border-white/10">
+            <button type="button"
+              onClick={() => setIsNotificationHistoryOpen(false)}
+              className={`flex-1 py-2 text-xs font-semibold transition ${
+                !isNotificationHistoryOpen
+                  ? 'text-blue-400 border-b-2 border-blue-400'
+                  : 'text-gray-400 hover:text-white'
+              }`}>
+              New ({notifications.length})
+            </button>
+            <button type="button"
+              onClick={() => setIsNotificationHistoryOpen(true)}
+              className={`flex-1 py-2 text-xs font-semibold transition ${
+                isNotificationHistoryOpen
+                  ? 'text-blue-400 border-b-2 border-blue-400'
+                  : 'text-gray-400 hover:text-white'
+              }`}>
+              History ({notificationHistory.length})
+            </button>
+          </div>
+
+          {!isNotificationHistoryOpen && (
+            <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
+              <button type="button"
+                onClick={() => {
+                  const archived = notifications.map(n => ({ ...n, read: true }));
+                  setNotificationHistory(prev => [...archived, ...prev]);
+                  setNotifications([]);
+                }}
+                disabled={notifications.length === 0}
+                className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">
+                Mark all as read
+              </button>
+              <button type="button"
+                onClick={() => {
+                  const archived = notifications.map(n => ({ ...n, read: true }));
+                  setNotificationHistory(prev => [...archived, ...prev]);
+                  setNotifications([]);
+                }}
+                disabled={notifications.length === 0}
+                className="text-xs text-red-400 hover:text-red-300 disabled:opacity-40">
+                Clear all
+              </button>
+            </div>
+          )}
+
+          <div className="max-h-[60vh] overflow-y-auto">
+            {isNotificationHistoryOpen ? (
+              notificationHistory.length === 0 ? (
+                <div className="px-4 py-10 text-center">
+                  <Bell className="w-8 h-8 mx-auto mb-2 text-gray-500" />
+                  <p className="text-sm text-gray-300">No history yet</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Notifications you read or clear will appear here.
+                  </p>
+                </div>
+              ) : (
+                notificationHistory.map(notification => (
+                  <div key={notification.id}
+                    className="px-4 py-3 border-b border-white/5 opacity-80">
+                    <div className="flex items-start gap-3">
+                      <div className="w-2 h-2 rounded-full mt-1.5 shrink-0 bg-gray-500" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-100">
+                          {notification.title || 'Notification'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1 break-words">
+                          {notification.message || notification.body || ''}
+                        </p>
+                        {notification.createdAt && (
+                          <p className="text-[10px] text-gray-500 mt-2">
+                            {new Date(notification.createdAt).toLocaleString()}
+                          </p>
+                        )}
+                        <div className="flex gap-3 mt-2">
+                          <button type="button"
+                            onClick={() => setNotificationHistory(prev =>
+                              prev.filter(item => item.id !== notification.id)
+                            )}
+                            className="text-[11px] text-red-400 hover:text-red-300">
+                            Delete permanently
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )
+            ) : (
+              notifications.length === 0 ? (
+                <div className="px-4 py-10 text-center">
+                  <Bell className="w-8 h-8 mx-auto mb-2 text-gray-500" />
+                  <p className="text-sm text-gray-300">No new notifications</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Your reminders and alerts will appear here.
+                  </p>
+                </div>
+              ) : (
+                notifications.map(notification => (
+                  <div key={notification.id}
+                    className="px-4 py-3 border-b border-white/5 bg-blue-500/5">
+                    <div className="flex items-start gap-3">
+                      <div className="w-2 h-2 rounded-full mt-1.5 shrink-0 bg-blue-400" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-100">
+                          {notification.title || 'Notification'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1 break-words">
+                          {notification.message || notification.body || ''}
+                        </p>
+                        {notification.createdAt && (
+                          <p className="text-[10px] text-gray-500 mt-2">
+                            {new Date(notification.createdAt).toLocaleString()}
+                          </p>
+                        )}
+                        <div className="flex gap-3 mt-2">
+                          <button type="button"
+                            onClick={() => {
+                              const archived = { ...notification, read: true };
+                              setNotifications(prev =>
+                                prev.filter(item => item.id !== notification.id)
+                              );
+                              setNotificationHistory(prev => [archived, ...prev]);
+                            }}
+                            className="text-[11px] text-blue-400 hover:text-blue-300">
+                            Mark as read
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )
+            )}
+          </div>
+        </div>
+      )}
+{/* Main Split Content: Left Sidebar + Right Task Workspace */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR (Hidden temporarily while searching or when collapsed by user) */}
         {!searchQuery.trim() && (
@@ -7536,7 +7842,7 @@ useEffect(() => {
                                 {formatHoursMins(focusMins).text}{' '}
                                 <span className="font-normal opacity-90">
                                   ({isWeekTab
-                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d Ã¢â‚¬Â¢ ${pct}%`
+                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${pct}%`
                                     : `${pct}%`})
                                 </span>
                               </span>
@@ -8130,10 +8436,10 @@ useEffect(() => {
                     onChange={(e) => setNewTaskTitle(e.target.value)}
                     placeholder={
                       isTomorrowTab
-                        ? `Plan a task in "Tomorrow", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
+                        ? `Plan a task in "Tomorrow", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
                         : isPlannedTab
-                        ? `Plan a task in "Planned", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
-                        : `Add a task to "${activeViewMeta.title}", press Ã£â‚¬Å’EnterÃ£â‚¬Â to save`
+                        ? `Plan a task in "Planned", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
+                        : `Add a task to "${activeViewMeta.title}", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
                     }
                     className="flex-1 min-w-[160px] bg-transparent text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none"
                   />
@@ -8199,7 +8505,7 @@ useEffect(() => {
                       <Clock className="w-3.5 h-3.5" />
                       <span>
                         {newTaskReminderTime
-                          ? `Tomorrow Ã¢â‚¬Â¢ ${newTaskReminderTime}`
+                          ? `Tomorrow ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderTime}`
                           : 'Tomorrow'}
                       </span>
                     </button>
@@ -8246,7 +8552,7 @@ useEffect(() => {
                         <Clock className="w-3.5 h-3.5" />
                         <span>
                           {newTaskDue === 'today' && newTaskReminderTime
-                            ? `Today Ã¢â‚¬Â¢ ${newTaskReminderTime}`
+                            ? `Today ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderTime}`
                             : 'Today'}
                         </span>
                       </button>
@@ -10331,7 +10637,7 @@ useEffect(() => {
                                   ti.checked ? 'line-through text-gray-500' : 'text-gray-300'
                                 }`}
                               >
-                                <span>{ti.checked ? 'Ã¢Ëœâ€˜' : 'Ã¢ËœÂ'}</span>
+                                <span>{ti.checked ? 'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“' : 'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â'}</span>
                                 <span className="truncate">{ti.text}</span>
                               </div>
                             ))}
@@ -10715,7 +11021,7 @@ useEffect(() => {
           {
             id: 'bronze',
             name: 'Bronze Medal',
-            rule: '2h Ã¢â‚¬â€œ 5h in a day',
+            rule: '2h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 5h in a day',
             count: streakAndAchievements.bronzeCount,
             color: '#ef5350',
             bg: 'rgba(239, 83, 80, 0.14)',
@@ -10723,7 +11029,7 @@ useEffect(() => {
           {
             id: 'silver',
             name: 'Silver Medal',
-            rule: '5h Ã¢â‚¬â€œ 8h in a day',
+            rule: '5h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 8h in a day',
             count: streakAndAchievements.silverCount,
             color: '#9ca3af',
             bg: 'rgba(156, 163, 175, 0.14)',
@@ -10731,7 +11037,7 @@ useEffect(() => {
           {
             id: 'gold',
             name: 'Gold Medal',
-            rule: '8h Ã¢â‚¬â€œ 12h in a day',
+            rule: '8h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 12h in a day',
             count: streakAndAchievements.goldCount,
             color: '#eab308',
             bg: 'rgba(234, 179, 8, 0.14)',
@@ -10739,7 +11045,7 @@ useEffect(() => {
           {
             id: 'uranium',
             name: 'Uranium Medal',
-            rule: '12h Ã¢â‚¬â€œ 15h in a day',
+            rule: '12h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 15h in a day',
             count: streakAndAchievements.uraniumCount,
             color: '#22c55e',
             bg: 'rgba(34, 197, 94, 0.14)',
@@ -10909,7 +11215,7 @@ useEffect(() => {
                               >
                                 <div
                                   title={`${d.dateStr}: ${formatHoursMins(d.mins).text}${
-                                    medal ? ` Ã¢â‚¬Â¢ ${medal.label} Medal (${medal.range})` : ''
+                                    medal ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${medal.label} Medal (${medal.range})` : ''
                                   }`}
                                   style={{
                                     borderColor: medal
@@ -10997,7 +11303,7 @@ useEffect(() => {
                             >
                               <div
                                 title={`${c.dateStr}: ${formatHoursMins(c.mins).text}${
-                                  medal ? ` Ã¢â‚¬Â¢ ${medal.label} Medal (${medal.range})` : ''
+                                  medal ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${medal.label} Medal (${medal.range})` : ''
                                 }`}
                                 style={{
                                   borderColor:
@@ -11217,7 +11523,7 @@ useEffect(() => {
                               soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
                             } else {
                               showToast(
-                                `Reach a ${daysTarget}-day continuous study streak (Ã¢â€°Â¥15m/day) to unlock!`
+                                `Reach a ${daysTarget}-day continuous study streak (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥15m/day) to unlock!`
                               );
                             }
                           }}
@@ -11238,7 +11544,7 @@ useEffect(() => {
                                   : 'bg-[#2b2b33] text-gray-400'
                               }`}
                             >
-                              Ãƒâ€”{particularMedalTotal}
+                              ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â{particularMedalTotal}
                             </span>
 
                             {unlocked ? (
@@ -11473,6 +11779,9 @@ useEffect(() => {
     </div>
   );
 }
+
+
+
 
 
 
