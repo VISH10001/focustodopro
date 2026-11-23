@@ -1,4 +1,4 @@
-﻿const getNow = () => new Date().toISOString();
+const getNow = () => new Date().toISOString();
 
 // Generate a collision-resistant ID for new records.
 export function createSyncId(prefix = 'item') {

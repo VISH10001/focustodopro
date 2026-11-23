@@ -33,7 +33,12 @@ pnpm-debug.log*
 
 # Local backup folders and files
 /backup_before_*/
+/backup-*/
+/backup_*/
+/TEST_CODEX_BACKUP/
 *.backup*
+*.bak
+installed-focustodopro.apk
 
 # Windows updater binaries (host separately)
 /public/updates/windows/*.exe

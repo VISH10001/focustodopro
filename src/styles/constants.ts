@@ -1,0 +1,1 @@
+export const fieldClass = 'w-full rounded-xl bg-white/[0.06] border border-white/10 p-3 text-white placeholder:text-slate-500 outline-none transition focus:border-[#ff6d59] focus:ring-2 focus:ring-[#7d43e8]/25';

@@ -97,8 +97,8 @@ public class AppUpdaterPlugin extends Plugin {
 
                 long totalBytes = connection.getContentLengthLong();
 
-                if (totalBytes > 100L * 1024L * 1024L) {
-                    throw new Exception("APK exceeds the 100 MB download limit.");
+                if (totalBytes > 300L * 1024L * 1024L) {
+                    throw new Exception("APK exceeds the 300 MB download limit.");
                 }
 
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -116,15 +116,14 @@ public class AppUpdaterPlugin extends Plugin {
                         digest.update(buffer, 0, count);
                         downloaded += count;
 
-                        if (totalBytes > 0) {
-                            int progress = (int) (downloaded * 100 / totalBytes);
-
-                            if (progress != lastProgress) {
-                                lastProgress = progress;
-                                JSObject progressData = new JSObject();
-                                progressData.put("progress", progress);
-                                notifyListeners("downloadProgress", progressData);
-                            }
+                        int progress = totalBytes > 0 ? (int) (downloaded * 100 / totalBytes) : 0;
+                        if (progress != lastProgress || downloaded == totalBytes) {
+                            lastProgress = progress;
+                            JSObject progressData = new JSObject();
+                            progressData.put("progress", progress);
+                            progressData.put("bytesDownloaded", downloaded);
+                            progressData.put("totalBytes", totalBytes);
+                            notifyListeners("downloadProgress", progressData);
                         }
                     }
                 }
@@ -179,3 +178,4 @@ public class AppUpdaterPlugin extends Plugin {
         });
     }
 }
+

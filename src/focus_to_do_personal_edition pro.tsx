@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { loadUserData, saveUserData } from './cloudSync.js';
 import {
   checkForAppUpdate,
   downloadAndInstallUpdate,
   addUpdateDownloadListener
 } from './appUpdater.js';
+import {
+  syncNativeReminders,
+  requestNotificationPermission,
+  checkNotificationPermission,
+  testNativeNotification
+} from './nativeNotifications.js';
 import {
   Search, Sun, Calendar, CalendarDays, CheckCircle2, Inbox, Plus, Play, Pause,
   Volume2, VolumeX, Maximize2, Minimize2, BarChart3,
@@ -14,6 +20,7 @@ import {
   Sunrise, AlertCircle, Flag, LayoutGrid, CalendarCheck, CalendarClock, Music, Timer,
   Archive, RotateCcw
 } from 'lucide-react';
+import { WeekdaySelector } from './components/WeekdaySelector';
 
 // ============================================================================
 // 1. WEB AUDIO API SOUND & WHITE NOISE ENGINE (Zero External Audio Dependencies)
@@ -126,7 +133,7 @@ class SoundEngine {
         return;
       }
 
-      // Default ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
+      // Default — Sound 3: Crisp Alien-Tech Mechanical & Crystalline Digital Click
       const carrier = this.ctx.createOscillator();
       const mod = this.ctx.createOscillator();
       const modGain = this.ctx.createGain();
@@ -400,9 +407,10 @@ const TomatoIcon = ({ filled = true, size = 12 }) => (
 const FocusLogoSVG = ({ size = 24 }) => (
   <svg width={size} height={size} viewBox="0 0 48 48" className="shrink-0 rounded-xl">
     <defs>
-      <linearGradient id="focusLogoGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="#ff6b2b" />
-        <stop offset="100%" stopColor="#ff1e56" />
+      <linearGradient id="focusLogoGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#ffb14a" />
+        <stop offset="48%" stopColor="#ff6c55" />
+        <stop offset="100%" stopColor="#7d43e8" />
       </linearGradient>
     </defs>
     <rect width="48" height="48" rx="12" fill="url(#focusLogoGrad)" />
@@ -540,8 +548,12 @@ export default function App({ user, onLogout }) {
   // Online application update state
   const [availableUpdate, setAvailableUpdate] = useState(null);
   const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateDownloadedBytes, setUpdateDownloadedBytes] = useState(0);
+  const [updateTotalBytes, setUpdateTotalBytes] = useState(0);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateMessage, setUpdateMessage] = useState('');
+  const [updateStatus, setUpdateStatus] = useState('idle');
+  const [updateError, setUpdateError] = useState('');
 
   // One-time migration to wipe legacy demo data so the app starts completely fresh
   useState(() => {
@@ -808,6 +820,7 @@ export default function App({ user, onLogout }) {
 
   // Independent Per-Project / Per-Tab Taskbar Drafts & Popover State
   const [taskbarDrafts, setTaskbarDrafts] = useState({});
+  const taskInputRef = useRef(null);
   const currentDraft = taskbarDrafts[activeFilter] || {
     title: '',
     pomodoros: 1,
@@ -816,6 +829,8 @@ export default function App({ user, onLogout }) {
     customDate: getDateStr(0),
     reminderType: 'none',
     reminderSchedule: 'always',
+    reminderWeekdays: [],
+    reminderDate: '',
     reminderTime: '',
     reminderAlarm: true,
   };
@@ -830,6 +845,8 @@ export default function App({ user, onLogout }) {
           customDate: getDateStr(0),
           reminderType: 'none',
           reminderSchedule: 'always',
+          reminderWeekdays: [],
+          reminderDate: '',
           reminderTime: '',
           reminderAlarm: true,
         };
@@ -854,6 +871,10 @@ export default function App({ user, onLogout }) {
   const setNewTaskReminderType = (val) => updateCurrentDraft({ reminderType: val });
   const newTaskReminderSchedule = currentDraft.reminderSchedule;
   const setNewTaskReminderSchedule = (val) => updateCurrentDraft({ reminderSchedule: val });
+  const newTaskReminderWeekdays = currentDraft.reminderWeekdays || [];
+  const setNewTaskReminderWeekdays = (val) => updateCurrentDraft({ reminderWeekdays: val });
+  const newTaskReminderDate = currentDraft.reminderDate || '';
+  const setNewTaskReminderDate = (val) => updateCurrentDraft({ reminderDate: val });
   const newTaskReminderTime = currentDraft.reminderTime;
   const setNewTaskReminderTime = (val) => updateCurrentDraft({ reminderTime: val });
   const newTaskReminderAlarm = currentDraft.reminderAlarm;
@@ -864,8 +885,13 @@ export default function App({ user, onLogout }) {
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [reminderModalContext, setReminderModalContext] = useState('task');
   const [isTimeClockPickerOpen, setIsTimeClockPickerOpen] = useState(false);
+  const [timePickerMode, setTimePickerMode] = useState('hours'); // 'hours' | 'minutes'
+  const [isProjectScheduleModalOpen, setIsProjectScheduleModalOpen] = useState(false);
+  const [schedulingProject, setSchedulingProject] = useState(null);
+  const [swipeTransitionDirection, setSwipeTransitionDirection] = useState(null);
   const [tempReminderHour, setTempReminderHour] = useState('12');
   const [tempReminderMinute, setTempReminderMinute] = useState('00');
+  const [tempReminderPeriod, setTempReminderPeriod] = useState('PM');
   const [plannerCalYear, setPlannerCalYear] = useState(() => new Date().getFullYear());
   const [plannerCalMonth, setPlannerCalMonth] = useState(() => new Date().getMonth());
   const [editingTaskId, setEditingTaskId] = useState(null);
@@ -880,6 +906,11 @@ export default function App({ user, onLogout }) {
   const [newProjectParentId, setNewProjectParentId] = useState(null);
   const [newProjectReminderTime, setNewProjectReminderTime] = useState('');
   const [newProjectReminderType, setNewProjectReminderType] = useState('none');
+  const [newProjectReminderSchedule, setNewProjectReminderSchedule] = useState('always');
+  const [newProjectReminderWeekdays, setNewProjectReminderWeekdays] = useState([]);
+  const [newProjectReminderDate, setNewProjectReminderDate] = useState('');
+  const [newProjectStartDate, setNewProjectStartDate] = useState('');
+  const [newProjectStartTime, setNewProjectStartTime] = useState('');
   const [expandedProjects, setExpandedProjects] = useState({});
   const [projectMenuId, setProjectMenuId] = useState(null);
   const [taskMenuId, setTaskMenuId] = useState(null);
@@ -918,7 +949,7 @@ useEffect(() => {
   let cancelled = false;
 
   async function loadCloudData() {
-    if (!user?.id) return;
+    if (!user?.id || user.isLocal) return;
 
     try {
       const cloudData = await loadUserData(user.id);
@@ -1011,7 +1042,7 @@ useEffect(() => {
 
   // Automatically sync changes to this user's cloud account
   useEffect(() => {
-    if (!user?.id || !cloudReady || !cloudHasData) return;
+    if (!user?.id || user.isLocal || !cloudReady || !cloudHasData) return;
 
     const timeout = setTimeout(() => {
       saveUserData(user.id, {
@@ -1076,6 +1107,7 @@ useEffect(() => {
   const [pendingTimerMode, setPendingTimerMode] = useState('countdown');
   const drumRollTimeoutRef = useRef(null);
   const touchStartYRef = useRef(null);
+  const appSwipeStartRef = useRef(null);
 
   // Reports & Calendar State
   const [reportPeriod, setReportPeriod] = useState('Daily');
@@ -1115,6 +1147,57 @@ useEffect(() => {
     toastTimeoutRef.current = setTimeout(() => setToastMsg(''), 3200);
   }, []);
 
+  const isProjectReminderContext = reminderModalContext === 'addProject' || reminderModalContext === 'editProject' || reminderModalContext === 'projectSchedule';
+  const reminderTarget = reminderModalContext === 'editProject'
+    ? editingProject
+    : reminderModalContext === 'projectSchedule'
+    ? schedulingProject
+    : reminderModalContext === 'addProject'
+    ? {
+        reminderType: newProjectReminderType,
+        reminderSchedule: newProjectReminderSchedule,
+        reminderWeekdays: newProjectReminderWeekdays,
+        reminderDate: newProjectReminderDate,
+      }
+    : {
+        reminderType: newTaskReminderType,
+        reminderSchedule: newTaskReminderSchedule,
+        reminderWeekdays: newTaskReminderWeekdays,
+        reminderDate: newTaskReminderDate,
+      };
+
+  const updateReminderTarget = (patch) => {
+    if (reminderModalContext === 'editProject' && editingProject) {
+      setEditingProject({ ...editingProject, ...patch });
+    } else if (reminderModalContext === 'projectSchedule' && schedulingProject) {
+      setSchedulingProject({ ...schedulingProject, ...patch });
+    } else if (reminderModalContext === 'addProject') {
+      if ('reminderType' in patch) setNewProjectReminderType(patch.reminderType);
+      if ('reminderSchedule' in patch) setNewProjectReminderSchedule(patch.reminderSchedule);
+      if ('reminderWeekdays' in patch) setNewProjectReminderWeekdays(patch.reminderWeekdays);
+      if ('reminderDate' in patch) setNewProjectReminderDate(patch.reminderDate);
+    } else {
+      if ('reminderType' in patch) setNewTaskReminderType(patch.reminderType);
+      if ('reminderSchedule' in patch) setNewTaskReminderSchedule(patch.reminderSchedule);
+      if ('reminderWeekdays' in patch) setNewTaskReminderWeekdays(patch.reminderWeekdays);
+      if ('reminderDate' in patch) setNewTaskReminderDate(patch.reminderDate);
+    }
+  };
+
+  const loadReminderTime = (time) => {
+    const [rawHour = '12', rawMinute = '00'] = (time || '12:00').split(':');
+    const hour24 = Math.max(0, Math.min(23, Number(rawHour) || 0));
+    setTempReminderHour(String(((hour24 + 11) % 12) + 1).padStart(2, '0'));
+    setTempReminderMinute(String(Math.max(0, Math.min(59, Number(rawMinute) || 0))).padStart(2, '0'));
+    setTempReminderPeriod(hour24 >= 12 ? 'PM' : 'AM');
+  };
+
+  const getReminderTime24 = () => {
+    const hour12 = Math.max(1, Math.min(12, Number(tempReminderHour) || 12));
+    const hour24 = (hour12 % 12) + (tempReminderPeriod === 'PM' ? 12 : 0);
+    return `${String(hour24).padStart(2, '0')}:${tempReminderMinute.padStart(2, '0')}`;
+  };
+
   // Automatic online update checks
   useEffect(() => {
     let active = true;
@@ -1139,11 +1222,19 @@ useEffect(() => {
     const intervalId = setInterval(checkUpdate, 6 * 60 * 60 * 1000);
     window.addEventListener('online', checkUpdate);
 
-    addUpdateDownloadListener((event) => {
+    Promise.resolve(addUpdateDownloadListener((event) => {
       if (active) {
-        setUpdateProgress(Number(event.progress) || 0);
+        const prog = Math.min(100, Math.max(0, Number(event.progress) || 0));
+        setUpdateProgress(prog);
+        if (event.bytesDownloaded) setUpdateDownloadedBytes(Number(event.bytesDownloaded) || 0);
+        if (event.totalBytes) setUpdateTotalBytes(Number(event.totalBytes) || 0);
+        if (prog >= 100) {
+          setUpdateStatus('verifying');
+        } else if (prog > 0) {
+          setUpdateStatus('downloading');
+        }
       }
-    }).then((handle) => {
+    })).then((handle) => {
       if (active) {
         progressHandle = handle;
       } else {
@@ -1160,6 +1251,17 @@ useEffect(() => {
       progressHandle?.remove();
     };
   }, []);
+
+  // Sync native Android background alarms and request permission
+  useEffect(() => {
+    requestNotificationPermission().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    syncNativeReminders(tasks, projects).catch((err) => {
+      console.warn('Native reminder sync failed:', err);
+    });
+  }, [tasks, projects]);
   // Only sessions >= 15 minutes affect statistics, trends, and reports
   const validSessions = useMemo(
     () => sessions.filter((s) => (Number(s.durationMins) || 0) >= 15),
@@ -1179,7 +1281,7 @@ useEffect(() => {
         return {
           tier: 'uranium',
           label: 'Uranium',
-          range: '12h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 15h',
+          range: '12h – 15h',
           color: '#22c55e',
           bg: 'rgba(34, 197, 94, 0.18)',
           border: '#22c55e',
@@ -1189,7 +1291,7 @@ useEffect(() => {
         return {
           tier: 'gold',
           label: 'Gold',
-          range: '8h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 12h',
+          range: '8h – 12h',
           color: '#eab308',
           bg: 'rgba(234, 179, 8, 0.18)',
           border: '#eab308',
@@ -1199,7 +1301,7 @@ useEffect(() => {
         return {
           tier: 'silver',
           label: 'Silver',
-          range: '5h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 8h',
+          range: '5h – 8h',
           color: '#9ca3af',
           bg: 'rgba(156, 163, 175, 0.18)',
           border: '#9ca3af',
@@ -1209,7 +1311,7 @@ useEffect(() => {
         return {
           tier: 'bronze',
           label: 'Bronze',
-          range: '2h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 5h',
+          range: '2h – 5h',
           color: '#ef5350',
           bg: 'rgba(239, 83, 80, 0.18)',
           border: '#ef5350',
@@ -1316,7 +1418,7 @@ useEffect(() => {
     const periodPeriodTitle =
       timesCompletedOffset === 0
         ? 'Current Period'
-        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
+        : `${wkStartObj.getDate()} ${monthNamesShort[wkStartObj.getMonth()]} • ${monthNamesShort[mRef.getMonth()]} ${targetYear}`;
 
     const weekQualDates = qualifiedDates.filter((d) => d >= wkStartStr && d <= wkEndStr);
     const monthQualDates = qualifiedDates.filter((d) => d.startsWith(monthPrefix));
@@ -1382,25 +1484,25 @@ useEffect(() => {
     const perTypeStreaks = [
       {
         id: 'bronze',
-        label: 'Bronze (2hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ5h)',
+        label: 'Bronze (2h – 5h)',
         color: '#ef5350',
         ...computeTierStreakStats((m) => m >= 120 && m < 300),
       },
       {
         id: 'silver',
-        label: 'Silver (5hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ8h)',
+        label: 'Silver (5h – 8h)',
         color: '#9ca3af',
         ...computeTierStreakStats((m) => m >= 300 && m < 480),
       },
       {
         id: 'gold',
-        label: 'Gold (8hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ12h)',
+        label: 'Gold (8h – 12h)',
         color: '#eab308',
         ...computeTierStreakStats((m) => m >= 480 && m < 720),
       },
       {
         id: 'uranium',
-        label: 'Uranium (12hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ15h)',
+        label: 'Uranium (12h – 15h)',
         color: '#22c55e',
         ...computeTierStreakStats((m) => m >= 720),
       },
@@ -1623,31 +1725,88 @@ useEffect(() => {
       const curTime = `${String(now.getHours()).padStart(2, '0')}:${String(
         now.getMinutes()
       ).padStart(2, '0')}`;
+      const reminderKey = `${curDate}:${curTime}`;
+      const matchesSchedule = (item) => {
+        if (item.reminderSchedule === 'weekdays') {
+          return (item.reminderWeekdays || []).includes(now.getDay());
+        }
+        if (item.reminderSchedule === 'date' || item.startDate) {
+          const targetDate = item.reminderDate || item.startDate;
+          return targetDate === curDate;
+        }
+        return !item.dueDate || item.dueDate === curDate;
+      };
+
       tasks.forEach((t) => {
         if (
           !t.completed &&
-          t.dueDate === curDate &&
           t.reminderTime === curTime &&
-          !t.reminderTriggered
+          t.reminderType !== 'none' &&
+          matchesSchedule(t) &&
+          t.reminderTriggeredFor !== reminderKey
         ) {
           if (t.reminderAlarm || t.reminderType === 'alarm') {
             soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
           } else {
             soundEngine.playTechClick('Quantum Sonar');
           }
-          showToast(`Reminder: "${t.title}" (${curTime})`);
-          addNotification('Task Reminder', t.title + ' is due now (' + curTime + ').', 'reminder');
+          const toastText = `Reminder: "${t.title}" (${curTime})`;
+          showToast(toastText);
+          addNotification('Task Reminder', `${t.title} is due now (${curTime}).`, 'reminder');
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification('Task Reminder', {
+                body: `${t.title} is due now (${curTime}).`,
+                icon: '/favicon.svg',
+              });
+            } catch (e) {}
+          }
           setTasks((prev) =>
             prev.map((item) =>
-              item.id === t.id ? { ...item, reminderTriggered: true } : item
+              item.id === t.id ? { ...item, reminderTriggeredFor: reminderKey } : item
             )
           );
+        }
+      });
+
+      projects.forEach((project) => {
+        const pTime = project.reminderTime || project.startTime;
+        const pType = project.reminderType || (project.startDate ? 'notification' : 'none');
+        if (
+          !project.archived &&
+          !project.inactive &&
+          pType !== 'none' &&
+          pTime === curTime &&
+          matchesSchedule(project) &&
+          project.reminderTriggeredFor !== reminderKey
+        ) {
+          if (pType === 'alarm') {
+            soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
+          } else {
+            soundEngine.playTechClick('Quantum Sonar');
+          }
+          const isDateSchedule = project.reminderSchedule === 'date' || Boolean(project.startDate);
+          const prefix = isDateSchedule ? 'Scheduled Project' : "Today's Project";
+          const message = `${prefix}: ${project.name}. Don't forget to work on this project today.`;
+          showToast(message);
+          addNotification('Project Reminder', message, 'reminder');
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(prefix, {
+                body: message,
+                icon: '/favicon.svg',
+              });
+            } catch (e) {}
+          }
+          setProjects((prev) => prev.map((item) =>
+            item.id === project.id ? { ...item, reminderTriggeredFor: reminderKey } : item
+          ));
         }
       });
     };
     const timer = setInterval(checkReminders, 10000);
     return () => clearInterval(timer);
-  }, [tasks, settings.focusAlarm, settings.alarmSound, showToast, addNotification]);
+  }, [tasks, projects, settings.focusAlarm, settings.alarmSound, showToast, addNotification]);
 
   const updateFlexibleMinutes = (mins) => {
     const clamped = Math.max(1, Math.min(480, Math.round(mins)));
@@ -1683,6 +1842,31 @@ useEffect(() => {
       updateFlexibleMinutes(settings.pomodoroLength + (diff > 0 ? 1 : -1));
       touchStartYRef.current = e.touches[0].clientY;
       setIsDrumRolling(true);
+    }
+  };
+
+  const handleAppSwipeStart = (event) => {
+    if (window.innerWidth >= 768 || event.touches.length !== 1) return;
+    const target = event.target;
+    if (target.closest('input, textarea, select, button, [data-no-swipe]')) return;
+    appSwipeStartRef.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  };
+
+  const handleAppSwipeEnd = (event) => {
+    const start = appSwipeStartRef.current;
+    appSwipeStartRef.current = null;
+    if (!start || window.innerWidth >= 768) return;
+    const dx = event.changedTouches[0].clientX - start.x;
+    const dy = event.changedTouches[0].clientY - start.y;
+    if (Math.abs(dx) < 72 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+    const views = ['workspace', 'focus', 'reports'];
+    const currentIndex = views.indexOf(activeView);
+    if (currentIndex < 0) return;
+    const nextIndex = dx < 0 ? Math.min(views.length - 1, currentIndex + 1) : Math.max(0, currentIndex - 1);
+    if (nextIndex !== currentIndex) {
+      setSwipeTransitionDirection(dx < 0 ? 'left' : 'right');
+      setActiveView(views[nextIndex]);
+      setTimeout(() => setSwipeTransitionDirection(null), 350);
     }
   };
 
@@ -1775,6 +1959,34 @@ useEffect(() => {
   }, [activeTabOffset]);
 
   const selectedWorkspaceDateStr = getDateStr(-activeTabOffset);
+  const currentWeekDays = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentDay = today.getDay();
+    const diffToMonday = (currentDay + 6) % 7;
+    const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - diffToMonday);
+
+    const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
+      const dayOfWeek = date.getDay();
+      const dayNum = date.getDate();
+      const monthStr = monthNames[date.getMonth()];
+      const dayStr = weekdayNames[dayOfWeek];
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      return {
+        day: dayOfWeek,
+        dateStr,
+        dayNum,
+        dayStr,
+        monthStr,
+        label: `${dayStr} — ${dayNum} ${monthStr}`,
+        isToday: dateStr === todayStr,
+      };
+    });
+  }, [todayStr]);
   const tomorrowTargetDateStr = getDateStr(1 + (futureTabOffsets.tomorrow || 0));
   const plannedTargetDateStr = getDateStr(futureTabOffsets.planned || 0);
 
@@ -1794,7 +2006,8 @@ useEffect(() => {
       return dateGoals[selectedWorkspaceDateStr] ?? settings.dailyGoalHours;
     }
     if (activeFilter.startsWith('proj-')) {
-      return tabGoals[activeFilter] ?? 4;
+      const projectDateKey = `${activeFilter}:${selectedWorkspaceDateStr}`;
+      return dateGoals[projectDateKey] ?? tabGoals[activeFilter] ?? 4;
     }
     return settings.dailyGoalHours;
   }, [
@@ -2237,6 +2450,8 @@ useEffect(() => {
       completedDate: null,
       reminderType: newTaskReminderType,
       reminderSchedule: newTaskReminderSchedule,
+      reminderWeekdays: newTaskReminderWeekdays,
+      reminderDate: newTaskReminderDate,
       reminderTime: hasReminder ? newTaskReminderTime : '',
       reminderAlarm: newTaskReminderType === 'alarm' || newTaskReminderAlarm,
     };
@@ -2246,12 +2461,15 @@ useEffect(() => {
       title: '',
       reminderTime: '',
       reminderType: 'none',
+      reminderSchedule: 'always',
+      reminderWeekdays: [],
+      reminderDate: '',
     });
     setTaskbarPopoverMode(null);
     const projObj = targetProjectId ? projects.find((p) => p.id === targetProjectId) : null;
     showToast(
       hasReminder
-        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
+        ? `Scheduled "${trimmed}"${projObj ? ` (${projObj.name})` : ''} • ${newTaskReminderType === 'alarm' ? 'Alarm' : 'Reminder'} at ${newTaskReminderTime}`
         : projObj
         ? `Added "${trimmed}" to ${projObj.name}`
         : `Added task "${trimmed}"`
@@ -2259,25 +2477,24 @@ useEffect(() => {
   };
 
   const handleToggleTaskComplete = (taskId) => {
-    let completedTaskTitle = '';
-    let wasCompleted = false;
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+
+    const wasCompleted = !targetTask.completed;
 
     setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const nextCompleted = !t.completed;
-        wasCompleted = nextCompleted;
-        completedTaskTitle = t.title;
-        return {
-          ...t,
-          completed: nextCompleted,
-          completedDate: nextCompleted ? todayStr : null,
-          completedPomodoros:
-            nextCompleted && t.completedPomodoros === 0 && t.estPomodoros > 0
-              ? t.estPomodoros
-              : t.completedPomodoros,
-        };
-      })
+      prev.map((t) => t.id === taskId
+        ? {
+            ...t,
+            completed: wasCompleted,
+            completedDate: wasCompleted ? todayStr : null,
+            completedPomodoros:
+              wasCompleted && t.completedPomodoros === 0 && t.estPomodoros > 0
+                ? t.estPomodoros
+                : t.completedPomodoros,
+          }
+        : t
+      )
     );
 
     if (wasCompleted) {
@@ -2288,7 +2505,7 @@ useEffect(() => {
         const nextCandidate = tasks.find((t) => t.id !== taskId && !t.completed);
         setSelectedTaskId(nextCandidate ? nextCandidate.id : '');
       }
-      showToast(`Completed "${completedTaskTitle}"`);
+      showToast(`Completed "${targetTask.title}"`);
     }
   };
 
@@ -2337,8 +2554,13 @@ useEffect(() => {
       color: newProjectColor,
       parentId: newProjectParentId || null,
       completed: false,
-      reminderTime: newProjectReminderType !== 'none' ? newProjectReminderTime : '',
-      reminderType: newProjectReminderType,
+      startDate: newProjectStartDate || '',
+      startTime: newProjectStartTime || '',
+      reminderTime: newProjectStartTime || (newProjectReminderType !== 'none' ? newProjectReminderTime : ''),
+      reminderType: newProjectStartDate ? (newProjectReminderType === 'none' ? 'notification' : newProjectReminderType) : newProjectReminderType,
+      reminderSchedule: newProjectStartDate ? 'date' : newProjectReminderSchedule,
+      reminderWeekdays: newProjectReminderWeekdays,
+      reminderDate: newProjectStartDate || newProjectReminderDate,
     };
     setProjects((prev) => [...prev, newProj]);
     if (newProjectParentId) {
@@ -2377,6 +2599,8 @@ useEffect(() => {
           completedDate: null,
           reminderType: newTaskReminderType,
           reminderSchedule: newTaskReminderSchedule,
+          reminderWeekdays: newTaskReminderWeekdays,
+          reminderDate: newTaskReminderDate,
           reminderTime: hasReminder ? newTaskReminderTime : '',
           reminderAlarm: newTaskReminderType === 'alarm' || newTaskReminderAlarm,
         };
@@ -2394,10 +2618,17 @@ useEffect(() => {
     setNewProjectParentId(null);
     setNewProjectReminderTime('');
     setNewProjectReminderType('none');
+    setNewProjectReminderSchedule('always');
+    setNewProjectReminderWeekdays([]);
+    setNewProjectReminderDate('');
+    setNewProjectStartDate('');
+    setNewProjectStartTime('');
     setIsAddProjectOpen(false);
     showToast(
       assignNewProjectToTask
         ? `Created project "${trimmed}" and linked to task`
+        : newProj.startDate
+        ? `Created project "${trimmed}" scheduled for ${newProj.startDate}`
         : newProj.reminderTime
         ? `Created ${newProj.parentId ? 'sub-project' : 'project'} "${trimmed}" with reminder at ${newProj.reminderTime}`
         : `Created ${newProj.parentId ? 'sub-project' : 'project'} "${trimmed}"`
@@ -2414,10 +2645,15 @@ useEffect(() => {
     const updatedProject = {
       ...editingProject,
       name: trimmed,
+      startDate: editingProject.startDate || '',
+      startTime: editingProject.startTime || '',
       reminderTime:
-        editingProject.reminderType !== 'none'
+        editingProject.startTime ||
+        (editingProject.reminderType !== 'none'
           ? editingProject.reminderTime || ''
-          : '',
+          : ''),
+      reminderDate: editingProject.startDate || editingProject.reminderDate || '',
+      reminderSchedule: editingProject.startDate ? 'date' : (editingProject.reminderSchedule || 'always'),
     };
 
     setProjects((prev) =>
@@ -2428,6 +2664,23 @@ useEffect(() => {
 
     setEditingProject(null);
     showToast(`Project "${trimmed}" updated`);
+  };
+
+  const handleClearProjectSchedule = (projId) => {
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== projId) return p;
+        return {
+          ...p,
+          startDate: '',
+          startTime: '',
+          reminderDate: '',
+          reminderTime: '',
+          reminderType: 'none',
+        };
+      })
+    );
+    showToast('Project schedule removed');
   };
   const handleConfirmToggleProjectActive = () => {
     if (!projectStatusConfirm) return;
@@ -2782,6 +3035,8 @@ useEffect(() => {
 
     return (
       <div
+        onTouchStart={handleAppSwipeStart}
+        onTouchEnd={handleAppSwipeEnd}
         className="fixed inset-0 z-50 flex flex-col lg:flex-row text-white overflow-hidden select-none"
         style={{
           background: wallpaperStyles[settings.focusWallpaper] || wallpaperStyles.forest,
@@ -2986,7 +3241,7 @@ useEffect(() => {
                       className="w-36 text-center bg-black/40 border border-[#ef5350] rounded-xl text-4xl sm:text-5xl font-light text-white py-1.5 focus:outline-none"
                     />
                     <span className="text-[11px] text-gray-300 mt-1.5">
-                      Enter 1 ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 480 mins
+                      Enter 1 – 480 mins
                     </span>
                   </form>
                 ) : (
@@ -2999,7 +3254,7 @@ useEffect(() => {
                     }}
                     title={
                       timerStatus === 'idle' && timerMode === 'countdown'
-                        ? 'Scroll mouse wheel or click to set 1 ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 480 mins'
+                        ? 'Scroll mouse wheel or click to set 1 – 480 mins'
                         : ''
                     }
                     className="flex flex-col items-center group"
@@ -3879,7 +4134,11 @@ useEffect(() => {
     };
 
     return (
-      <div className="fixed inset-0 z-50 bg-[#121214] text-gray-100 flex flex-col overflow-hidden">
+      <div
+        onTouchStart={handleAppSwipeStart}
+        onTouchEnd={handleAppSwipeEnd}
+        className="fixed inset-0 z-50 bg-[#121214] text-gray-100 flex flex-col overflow-hidden"
+      >
         {/* Top Header Bar */}
         <div className="h-14 px-6 border-b border-[#242428] flex items-center justify-between bg-[#18181b] shrink-0">
           <div className="w-8" />
@@ -4707,7 +4966,7 @@ useEffect(() => {
                     isHighlight: offsetDays === 0,
                   });
                 }
-                periodRangeBadge = `${trendPoints[0]?.fullTitle} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
+                periodRangeBadge = `${trendPoints[0]?.fullTitle} – ${trendPoints[trendPoints.length - 1]?.fullTitle}`;
               } else if (studyTrendTab === 'Weekly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4736,7 +4995,7 @@ useEffect(() => {
                 }
                 const wkEnd = new Date(weekMonday);
                 wkEnd.setDate(weekMonday.getDate() + 6);
-                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
+                periodRangeBadge = `${weekMonday.getDate()} ${monthNamesShort[weekMonday.getMonth()]} – ${wkEnd.getDate()} ${monthNamesShort[wkEnd.getMonth()]} ${wkEnd.getFullYear()}`;
               } else if (studyTrendTab === 'Monthly') {
                 fixedMaxAxisHours = 16;
                 const now = new Date();
@@ -4787,7 +5046,7 @@ useEffect(() => {
                   ...trendPoints.map((p) => Math.ceil(p.mins / 60))
                 );
                 fixedMaxAxisHours = Math.max(16, Math.ceil(maxMonthHours / 8) * 8);
-                periodRangeBadge = `Year ${targetYear} (Jan ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Dec)`;
+                periodRangeBadge = `Year ${targetYear} (Jan – Dec)`;
               }
 
               const yTicks = Array.from({ length: 9 }, (_, idx) =>
@@ -6382,9 +6641,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[10px] text-gray-400">
                             {t.projectName}
-                            {t.dueDate ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Date: ${t.dueDate}` : ''}
+                            {t.dueDate ? ` • Date: ${t.dueDate}` : ''}
                             {t.recordedMins > 0
-                              ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` • Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6475,9 +6734,9 @@ useEffect(() => {
                           </div>
                           <div className="text-[11px] text-gray-400">
                             Project: {t.projectName}
-                            {t.archivedAt ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Archived on ${t.archivedAt}` : ''}
+                            {t.archivedAt ? ` • Archived on ${t.archivedAt}` : ''}
                             {t.recordedMins > 0
-                              ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Focus: ${formatHoursMins(t.recordedMins).text}`
+                              ? ` • Focus: ${formatHoursMins(t.recordedMins).text}`
                               : ''}
                           </div>
                         </div>
@@ -6613,6 +6872,8 @@ useEffect(() => {
   // ============================================================================
   return (
     <div
+      onTouchStart={handleAppSwipeStart}
+      onTouchEnd={handleAppSwipeEnd}
       onClickCapture={(e) => {
         const interactiveEl = e.target.closest(
           'button, select, input[type="range"], input[type="checkbox"], [role="button"], .cursor-pointer'
@@ -6627,13 +6888,13 @@ useEffect(() => {
         if (isProfileMenuOpen) setIsProfileMenuOpen(false);
         if (taskbarPopoverMode) setTaskbarPopoverMode(null);
       }}
-      className={`h-screen w-screen ${
+      className={`ftd-shell h-screen w-screen ${
         isAmoled ? 'bg-black' : 'bg-[#121214]'
       } text-gray-100 flex flex-col overflow-hidden select-none font-sans`}
     >
       {/* Top Desktop Window / Action Bar */}
       <header
-        className={`h-11 ${
+        className={`ftd-topbar h-11 ${
           isAmoled ? 'bg-black' : 'bg-[#18181b]'
         } border-b border-[#242429] px-3 sm:px-4 flex items-center justify-between gap-3 shrink-0`}
       >
@@ -6702,7 +6963,10 @@ useEffect(() => {
 
           <button
             type="button"
-            onClick={() => {}}
+            onClick={() => {
+              setTempGoalHours(settings.dailyGoalHours);
+              setIsGoalModalOpen(true);
+            }}
             title="Goal Target"
             className="p-1.5 rounded-lg hover:bg-white/10 transition flex items-center justify-center"
           >
@@ -6766,7 +7030,7 @@ useEffect(() => {
             </div>
             <button type="button" onClick={() => setIsNotificationCenterOpen(false)}
               className="text-gray-400 hover:text-white text-lg px-2" title="Close">
-              Ãƒâ€”
+              ×
             </button>
           </div>
 
@@ -6912,9 +7176,9 @@ useEffect(() => {
         {/* LEFT SIDEBAR (Hidden temporarily while searching or when collapsed by user) */}
         {!searchQuery.trim() && (
           <aside
-            className={`${isSidebarOpen ? 'w-64 border-r border-[#242429]' : 'w-0 border-r-0'} ${
+            className={`ftd-sidebar ${isSidebarOpen ? 'w-64 border-r border-[#242429]' : 'w-0 border-r-0'} ${
               isAmoled ? 'bg-black' : 'bg-[#18181b]'
-            } flex flex-col justify-between transition-all duration-200 overflow-hidden shrink-0`}
+            } flex flex-col min-h-0 transition-all duration-200 overflow-hidden shrink-0`}
           >
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {/* User Profile Header + Dropdown Menu */}
@@ -6965,6 +7229,31 @@ useEffect(() => {
                       className="w-full text-left px-4 py-2 text-gray-100 hover:bg-white/10 transition"
                     >
                       Sync Now
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={updateBusy}
+                      onClick={async () => {
+                        if (updateBusy) return;
+                        setUpdateBusy(true);
+                        try {
+                          const update = await checkForAppUpdate();
+                          if (update) {
+                            setAvailableUpdate(update);
+                            setIsProfileMenuOpen(false);
+                          } else {
+                            showToast('You are up to date. FocusToDoPro v1.0.2 is the latest version.');
+                          }
+                        } catch (error) {
+                          showToast(error?.message || 'Could not check for updates.');
+                        } finally {
+                          setUpdateBusy(false);
+                        }
+                      }}
+                      className="w-full text-left px-4 py-2 text-gray-100 hover:bg-white/10 disabled:opacity-50 transition"
+                    >
+                      {updateBusy ? 'Checking for Updates…' : 'Check for Updates'}
                     </button>
 
                     <div className="my-1.5 border-t border-[#32323a]" />
@@ -7300,15 +7589,16 @@ useEffect(() => {
                             <div key={proj.id} className="relative">
                               <div
                                 onClick={() => setActiveFilter(proj.id)}
-                                className={`group w-full px-2.5 py-2 rounded-xl flex items-center justify-between text-xs cursor-pointer transition ${
+                                style={isSelected ? { borderColor: `${proj.color}75`, backgroundColor: '#25252c' } : {}}
+                                className={`group w-full px-2.5 py-2 rounded-xl border flex items-center justify-between text-xs cursor-pointer transition ${
                                   isSelected
-                                    ? 'bg-[#28282f] border border-[#ef5350]/45 text-white font-semibold'
-                                    : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                                    ? 'text-white font-semibold shadow-xs'
+                                    : 'border-transparent text-gray-300 hover:bg-white/5 hover:text-white'
                                 } ${proj.inactive ? 'opacity-55' : ''}`}
                               >
                                 <div className="flex items-center gap-2.5 min-w-0">
                                   <span
-                                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                                    className="w-2.5 h-2.5 rounded-sm shrink-0"
                                     style={{ backgroundColor: proj.color }}
                                   />
                                   <span
@@ -7318,6 +7608,14 @@ useEffect(() => {
                                   >
                                     {proj.name}
                                   </span>
+                                  {proj.startDate && (
+                                    <span
+                                      title={`Scheduled: ${formatShortDateLabel(proj.startDate)}`}
+                                      className="text-[10px] text-amber-400 shrink-0"
+                                    >
+                                      📅
+                                    </span>
+                                  )}
                                   {proj.inactive && (
                                     <span className="px-1.5 py-0.2 rounded bg-gray-700/60 text-[9px] text-gray-400">
                                       Inactive
@@ -7390,6 +7688,18 @@ useEffect(() => {
                                   >
                                     <Plus className="w-3.5 h-3.5" />
                                     <span>Add Sub-Project</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setProjectMenuId(null);
+                                      setSchedulingProject(proj);
+                                      setIsProjectScheduleModalOpen(true);
+                                    }}
+                                    className="w-full text-left px-3.5 py-2 text-gray-200 hover:bg-white/10 flex items-center gap-2 transition"
+                                  >
+                                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>{proj.startDate ? 'Edit Schedule' : 'Schedule Project'}</span>
                                   </button>
                                   <div className="my-1 border-t border-[#32323a]" />
                                   <button
@@ -7540,6 +7850,64 @@ useEffect(() => {
                   )}
                 </div>
               )}
+
+              {/* Quick Glance stats widget to remove empty void & enhance productivity */}
+              <div className="mt-4 pt-3 border-t border-[#222228] px-2.5 space-y-3">
+                <div className="text-[10px] font-semibold text-gray-400 tracking-wider uppercase flex items-center justify-between">
+                  <span>Focus Glance</span>
+                  <span className="text-[10px] font-normal text-gray-500">Today</span>
+                </div>
+
+                {/* Today focus progress */}
+                <div className="p-2.5 rounded-xl bg-[#1b1b20] border border-[#272730] space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-gray-300">Daily Target</span>
+                    <span className="text-white font-medium">
+                      {formatHoursMins(workspaceStats.todayFocusMins).text} / {activeTabGoalHours}h
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-[#272730] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#ef5350] to-[#f87171] rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, Math.round((workspaceStats.todayFocusMins / (activeTabGoalHours * 60 || 1)) * 100))}%`
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-gray-400 pt-0.5">
+                    <span>{tasks.filter((t) => !t.completed).length} pending tasks</span>
+                    <span>{projects.filter((p) => !p.parentId && !p.archived).length} projects</span>
+                  </div>
+                </div>
+
+                {/* Upcoming Scheduled Projects */}
+                {(() => {
+                  const scheduledProjects = projects.filter(
+                    (p) => !p.archived && (p.startDate || p.reminderSchedule === 'date')
+                  );
+                  if (scheduledProjects.length === 0) return null;
+                  return (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-gray-400 font-medium">Upcoming Schedules</span>
+                      {scheduledProjects.slice(0, 3).map((sp) => (
+                        <div
+                          key={sp.id}
+                          onClick={() => setActiveFilter(sp.id)}
+                          className="px-2 py-1.5 rounded-lg bg-[#18181d] border border-[#26262e] text-[11px] flex items-center justify-between cursor-pointer hover:border-gray-600 transition"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sp.color }} />
+                            <span className="text-gray-200 truncate">{sp.name}</span>
+                          </div>
+                          <span className="text-[10px] text-amber-400/90 shrink-0 font-medium ml-1">
+                            {formatShortDateLabel(sp.startDate || sp.reminderDate)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
           {/* Sidebar Footer: + Add Project, Tag, Folder */}
@@ -7677,7 +8045,15 @@ useEffect(() => {
             </div>
           ) : (
             <>
-          <div className="flex-1 overflow-y-auto px-4 sm:px-8 pt-6 pb-28 max-w-5xl w-full mx-auto space-y-5">
+          <div
+            onDoubleClick={(e) => {
+              if (e.target === e.currentTarget && activeFilter.startsWith('proj-')) {
+                setNewTaskProjectId(activeFilter);
+                taskInputRef.current?.focus();
+              }
+            }}
+            className="flex-1 overflow-y-auto px-4 sm:px-8 pt-6 pb-36 sm:pb-28 max-w-5xl w-full mx-auto space-y-5"
+          >
             {/* Workspace Header & Project Layout (Green KPI -> Yellow Date/Efficiency -> Purple Sub-Projects) */}
             {(() => {
               const isProjectView = !searchQuery.trim() && activeFilter.startsWith('proj-');
@@ -7842,7 +8218,7 @@ useEffect(() => {
                                 {formatHoursMins(focusMins).text}{' '}
                                 <span className="font-normal opacity-90">
                                   ({isWeekTab
-                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${pct}%`
+                                    ? `Avg ${formatHoursMins(workspaceStats.weekAvgDailyMins).text}/d • ${pct}%`
                                     : `${pct}%`})
                                 </span>
                               </span>
@@ -7890,21 +8266,89 @@ useEffect(() => {
               const subProjs = projects.filter(
                 (p) => p.parentId === activeFilter && !p.archived
               );
+              const currentProject = projects.find((p) => p.id === activeFilter);
+              const projectColor = currentProject?.color || '#ef5350';
 
               return (
                 <>
-                  {/* 1. Project Title */}
-                  <div className="flex items-center justify-between gap-3">
-                    <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                      {activeViewMeta.title}
-                    </h1>
+                  {/* 1. Project Title & Actions */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className="w-4 h-4 rounded-md shrink-0 shadow-sm"
+                        style={{ backgroundColor: projectColor }}
+                      />
+                      <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight truncate">
+                        {activeViewMeta.title}
+                      </h1>
+                      {currentProject?.inactive && (
+                        <span className="px-2 py-0.5 rounded-md bg-gray-700/60 text-xs text-gray-400">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSchedulingProject(currentProject);
+                          setIsProjectScheduleModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-[#1e1e24] hover:bg-[#282830] border border-[#2f2f3a] text-xs font-medium text-gray-200 hover:text-white flex items-center gap-1.5 transition shadow-xs"
+                        title="Schedule Project Start Date & Time"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{currentProject?.startDate ? 'Edit Schedule' : 'Schedule Start'}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 2. Green Box: Fixed Project-Total 4-Column KPI Summary */}
+                  {/* 1.1 Project Schedule Banner (Calendar Date & Time) */}
+                  {currentProject?.startDate && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-[#1c1c22] border border-amber-500/25">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 shrink-0">
+                          <Calendar className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-white flex flex-wrap items-center gap-2">
+                            <span>Scheduled to Start: {formatFullDate(currentProject.startDate)}</span>
+                            {currentProject.startTime && (
+                              <span className="text-amber-300 font-semibold">at {format12Hour(currentProject.startTime)}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-400 mt-0.5">
+                            {currentProject.reminderType === 'alarm' ? '🔔 Sound Alarm will alert on start time' : '🔔 Notification reminder scheduled'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSchedulingProject(currentProject);
+                            setIsProjectScheduleModalOpen(true);
+                          }}
+                          className="px-3 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/15 text-gray-200 transition"
+                        >
+                          Change
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleClearProjectSchedule(currentProject.id)}
+                          className="px-3 py-1 text-xs rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Color-Accented Project-Total 4-Column KPI Summary */}
                   <div className="rounded-2xl bg-[#18181b] border border-[#242429] p-4 sm:p-5">
                     <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[#26262c] text-center">
                       <div className="py-1 px-2">
-                        <div className="flex items-baseline justify-center gap-0.5 text-[#ef5350]">
+                        <div className="flex items-baseline justify-center gap-0.5" style={{ color: projectColor }}>
                           <span className="text-2xl sm:text-3xl font-light">{estFmt.h}</span>
                           <span className="text-xs text-gray-400">h</span>
                           <span className="text-2xl sm:text-3xl font-light ml-1">{estFmt.m}</span>
@@ -7914,14 +8358,14 @@ useEffect(() => {
                       </div>
 
                       <div className="py-1 px-2">
-                        <div className="text-2xl sm:text-3xl font-light text-[#ef5350]">
+                        <div className="text-2xl sm:text-3xl font-light" style={{ color: projectColor }}>
                           {workspaceStats.toCompleteCount}
                         </div>
                         <div className="text-xs text-gray-400 mt-1">Tasks to be Completed</div>
                       </div>
 
                       <div className="py-1 px-2">
-                        <div className="flex items-baseline justify-center gap-0.5 text-[#ef5350]">
+                        <div className="flex items-baseline justify-center gap-0.5" style={{ color: projectColor }}>
                           <span className="text-2xl sm:text-3xl font-light">{elapFmt.h}</span>
                           <span className="text-xs text-gray-400">h</span>
                           <span className="text-2xl sm:text-3xl font-light ml-1">{elapFmt.m}</span>
@@ -7931,7 +8375,7 @@ useEffect(() => {
                       </div>
 
                       <div className="py-1 px-2">
-                        <div className="text-2xl sm:text-3xl font-light text-[#ef5350]">
+                        <div className="text-2xl sm:text-3xl font-light" style={{ color: projectColor }}>
                           {workspaceStats.completedCount}
                         </div>
                         <div className="text-xs text-gray-400 mt-1">Completed Tasks</div>
@@ -8432,14 +8876,15 @@ useEffect(() => {
 
                   <input
                     type="text"
+                    ref={taskInputRef}
                     value={newTaskTitle}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
                     placeholder={
                       isTomorrowTab
-                        ? `Plan a task in "Tomorrow", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
+                        ? `Plan a task in "Tomorrow", press Enter to save`
                         : isPlannedTab
-                        ? `Plan a task in "Planned", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
-                        : `Add a task to "${activeViewMeta.title}", press ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢EnterÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â to save`
+                        ? `Plan a task in "Planned", press Enter to save`
+                        : `Add a task to "${activeViewMeta.title}", press Enter to save`
                     }
                     className="flex-1 min-w-[160px] bg-transparent text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none"
                   />
@@ -8505,7 +8950,7 @@ useEffect(() => {
                       <Clock className="w-3.5 h-3.5" />
                       <span>
                         {newTaskReminderTime
-                          ? `Tomorrow ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderTime}`
+                          ? `Tomorrow • ${newTaskReminderTime}`
                           : 'Tomorrow'}
                       </span>
                     </button>
@@ -8552,7 +8997,7 @@ useEffect(() => {
                         <Clock className="w-3.5 h-3.5" />
                         <span>
                           {newTaskDue === 'today' && newTaskReminderTime
-                            ? `Today ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${newTaskReminderTime}`
+                            ? `Today • ${newTaskReminderTime}`
                             : 'Today'}
                         </span>
                       </button>
@@ -8630,17 +9075,17 @@ useEffect(() => {
 
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-300">Reminder Time</span>
-                      <input
-                        type="time"
-                        value={newTaskReminderTime || '12:00'}
-                        onChange={(e) => {
-                          setNewTaskReminderTime(e.target.value);
-                          if (newTaskReminderType === 'none') {
-                            setNewTaskReminderType('notification');
-                          }
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReminderModalContext('task');
+                          loadReminderTime(newTaskReminderTime);
+                          setIsReminderModalOpen(true);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-[#141418] border border-[#34343e] text-xs text-white focus:outline-none focus:border-[#ef5350]"
-                      />
+                        className="min-h-9 rounded-lg border border-[#34343e] bg-[#141418] px-3 text-xs text-white hover:border-[#ef5350]"
+                      >
+                        {newTaskReminderTime || 'Set time'}
+                      </button>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -9078,8 +9523,19 @@ useEffect(() => {
               })}
 
               {activeTasks.length === 0 && (
-                <div className="text-center py-10 text-xs text-gray-500">
-                  No pending tasks in this view.
+                <div
+                  onDoubleClick={(event) => {
+                    if (event.target !== event.currentTarget || !activeFilter.startsWith('proj-')) return;
+                    setNewTaskProjectId(activeFilter);
+                    requestAnimationFrame(() => taskInputRef.current?.focus());
+                  }}
+                  className={`text-center py-10 text-xs text-gray-500 ${
+                    activeFilter.startsWith('proj-') ? 'cursor-text rounded-xl hover:bg-white/[0.02]' : ''
+                  }`}
+                >
+                  {activeFilter.startsWith('proj-')
+                    ? 'No pending tasks. Double-click here to add one.'
+                    : 'No pending tasks in this view.'}
                 </div>
               )}
             </div>
@@ -9165,10 +9621,43 @@ useEffect(() => {
                 )}
               </div>
             )}
+
+            {/* Project View Empty Space Double-Click Area (Windows Mouse & Android Tap) */}
+            {activeFilter.startsWith('proj-') && (
+              <div
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setNewTaskProjectId(activeFilter);
+                  taskInputRef.current?.focus();
+                  taskInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                onClick={() => {
+                  if (window.innerWidth < 768) {
+                    setNewTaskProjectId(activeFilter);
+                    taskInputRef.current?.focus();
+                    taskInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }}
+                className="mt-6 min-h-[140px] rounded-2xl border-2 border-dashed border-[#26262e] hover:border-[#383844] flex flex-col items-center justify-center gap-2.5 p-6 text-gray-500 hover:text-gray-400 transition cursor-pointer select-none group"
+                title="Double-click empty space to add task"
+              >
+                <div className="w-10 h-10 rounded-full bg-white/5 group-hover:bg-white/10 flex items-center justify-center transition">
+                  <Plus className="w-5 h-5 text-gray-400 group-hover:text-white" />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-gray-400 font-medium group-hover:text-gray-200">
+                    Double-click empty space to add task
+                  </p>
+                  <p className="text-[11px] text-gray-600 mt-0.5 md:hidden">
+                    (Tap to create a new task in this project)
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Floating Bottom Mini-Player Pill */}
-          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30">
+          <div className="absolute bottom-16 md:bottom-5 left-1/2 -translate-x-1/2 z-30">
             <div
               onClick={() => setActiveView('focus')}
               className="flex items-center gap-3.5 px-4 py-2 rounded-2xl bg-[#1b1b20]/95 backdrop-blur-md border border-[#2e2e36] shadow-2xl cursor-pointer hover:border-[#42424d] transition"
@@ -9205,6 +9694,63 @@ useEffect(() => {
             </>
           )}
         </main>
+
+        {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#161619]/95 backdrop-blur-md border-t border-[#26262d] px-3 py-1.5 flex items-center justify-around">
+          <button
+            type="button"
+            onClick={() => {
+              setSwipeTransitionDirection('right');
+              setActiveView('workspace');
+              setTimeout(() => setSwipeTransitionDirection(null), 300);
+            }}
+            className={`flex-1 py-1 flex flex-col items-center gap-1 rounded-xl transition ${
+              activeView === 'workspace'
+                ? 'text-[#ef5350] font-semibold'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <FolderKanban className="w-5 h-5" />
+            <span className="text-[10px]">Workspace</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('focus');
+            }}
+            className={`flex-1 py-1 flex flex-col items-center gap-1 rounded-xl transition ${
+              activeView === 'focus'
+                ? 'text-[#ef5350] font-semibold'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <div className="relative">
+              <Timer className="w-5 h-5" />
+              {timerStatus === 'running' && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#ef5350] animate-ping" />
+              )}
+            </div>
+            <span className="text-[10px]">Focus</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSwipeTransitionDirection('left');
+              setActiveView('reports');
+              setTimeout(() => setSwipeTransitionDirection(null), 300);
+            }}
+            className={`flex-1 py-1 flex flex-col items-center gap-1 rounded-xl transition ${
+              activeView === 'reports'
+                ? 'text-[#ef5350] font-semibold'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <BarChart3 className="w-5 h-5" />
+            <span className="text-[10px]">Reports</span>
+          </button>
+        </nav>
       </div>
 
       {/* ==================================================================== */}
@@ -9276,11 +9822,115 @@ useEffect(() => {
               })}
             </div>
 
-            {/* Project Reminder Time Trigger (Clean Clock Button without --:-- --) */}
+            {/* Project Schedule (Start Date & Start Time - Calendar Based) */}
+            <div className="rounded-xl bg-[#202026] border border-[#2e2e38] p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-[#ef5350]" />
+                  Project Start Schedule
+                </span>
+                {(editingProject ? editingProject.startDate : newProjectStartDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editingProject) {
+                        setEditingProject({
+                          ...editingProject,
+                          startDate: '',
+                          startTime: '',
+                          reminderDate: '',
+                          reminderTime: '',
+                          reminderType: 'none',
+                        });
+                      } else {
+                        setNewProjectStartDate('');
+                        setNewProjectStartTime('');
+                        setNewProjectReminderDate('');
+                        setNewProjectReminderTime('');
+                        setNewProjectReminderType('none');
+                      }
+                    }}
+                    className="text-[10px] text-red-400 hover:text-red-300 transition"
+                  >
+                    Clear Schedule
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-[11px] text-gray-400">
+                  Start Date
+                  <input
+                    type="date"
+                    value={editingProject ? (editingProject.startDate || '') : newProjectStartDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (editingProject) {
+                        setEditingProject({
+                          ...editingProject,
+                          startDate: val,
+                          reminderDate: val,
+                          reminderSchedule: 'date',
+                          reminderType: editingProject.reminderType === 'none' ? 'notification' : editingProject.reminderType,
+                        });
+                      } else {
+                        setNewProjectStartDate(val);
+                        setNewProjectReminderDate(val);
+                        setNewProjectReminderSchedule('date');
+                        if (newProjectReminderType === 'none') setNewProjectReminderType('notification');
+                      }
+                    }}
+                    className="mt-1 w-full rounded-lg border border-[#34343c] bg-[#18181c] px-2.5 py-1.5 text-xs text-white outline-none focus:border-[#ef5350]"
+                  />
+                </label>
+
+                <div>
+                  <span className="block text-[11px] text-gray-400">Start Time</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ctx = editingProject ? 'editProject' : 'addProject';
+                      setReminderModalContext(ctx);
+                      const currentVal = editingProject
+                        ? (editingProject.startTime || editingProject.reminderTime)
+                        : (newProjectStartTime || newProjectReminderTime);
+                      loadReminderTime(currentVal);
+                      setIsTimeClockPickerOpen(true);
+                    }}
+                    className="mt-1 w-full rounded-lg border border-[#34343c] bg-[#18181c] hover:border-gray-500 px-2.5 py-1.5 text-xs text-white flex items-center justify-between transition"
+                  >
+                    <span className="tabular-nums">
+                      {format12Hour(
+                        editingProject
+                          ? (editingProject.startTime || editingProject.reminderTime || '09:00')
+                          : (newProjectStartTime || newProjectReminderTime || '09:00')
+                      )}
+                    </span>
+                    <Clock className="w-3.5 h-3.5 text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {(editingProject ? editingProject.startDate : newProjectStartDate) && (
+                <div className="text-[11px] text-emerald-400 flex items-center gap-1.5">
+                  <Check className="w-3 h-3" />
+                  <span>
+                    Starts on {formatFullDate(editingProject ? editingProject.startDate : newProjectStartDate)} at{' '}
+                    {format12Hour(
+                      editingProject
+                        ? (editingProject.startTime || editingProject.reminderTime || '09:00')
+                        : (newProjectStartTime || newProjectReminderTime || '09:00')
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Reminder & Alarm Settings Button */}
             <div className="flex items-center justify-between pt-1">
               <span className="text-xs text-gray-300 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-[#ef5350]" />
-                Reminder Time
+                <Bell className="w-3.5 h-3.5 text-[#ef5350]" />
+                Reminder / Weekdays
               </span>
               <button
                 type="button"
@@ -9290,30 +9940,25 @@ useEffect(() => {
                   const currentVal = editingProject
                     ? editingProject.reminderTime
                     : newProjectReminderTime;
-                  if (currentVal && currentVal.includes(':')) {
-                    const [hh, mm] = currentVal.split(':');
-                    setTempReminderHour(hh);
-                    setTempReminderMinute(mm);
-                  } else {
-                    setTempReminderHour('12');
-                    setTempReminderMinute('00');
-                  }
+                  loadReminderTime(currentVal);
                   setIsReminderModalOpen(true);
                 }}
                 className="px-3 py-1.5 rounded-lg bg-[#18181c] hover:bg-[#2a2a32] border border-[#34343c] text-xs text-white flex items-center gap-2 transition"
               >
                 {(() => {
-                  const activeTime = editingProject
-                    ? editingProject.reminderTime
-                    : newProjectReminderTime;
                   const activeType = editingProject
                     ? editingProject.reminderType
                     : newProjectReminderType;
-                  return activeTime && activeType !== 'none' ? (
-                    <span>{activeTime}</span>
-                  ) : null;
+                  const activeSched = editingProject
+                    ? editingProject.reminderSchedule
+                    : newProjectReminderSchedule;
+                  return activeType && activeType !== 'none' ? (
+                    <span className="capitalize">{activeSched === 'weekdays' ? 'Weekdays' : activeType}</span>
+                  ) : (
+                    <span className="text-gray-400">Configure</span>
+                  );
                 })()}
-                <Clock className="w-3.5 h-3.5 text-gray-400" />
+                <Sliders className="w-3 h-3 text-gray-400" />
               </button>
             </div>
 
@@ -9347,45 +9992,50 @@ useEffect(() => {
       {isReminderModalOpen && (
         <div
           onClick={() => setIsReminderModalOpen(false)}
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 max-sm:items-end max-sm:p-0"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xs rounded-2xl bg-[#18181b] border border-[#2e2e36] overflow-hidden shadow-2xl"
+            className="w-full max-w-sm rounded-3xl bg-[#18181c] border border-[#2e2e36] overflow-hidden shadow-2xl max-sm:rounded-b-none"
           >
             <div className="pt-5 pb-4 px-5 text-center border-b border-[#25252b]">
-              <h3 className="text-xs font-medium text-gray-400 mb-2">New reminder</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Reminder Settings</h3>
               <button
                 type="button"
-                onClick={() => setIsTimeClockPickerOpen(true)}
-                className="inline-flex flex-col items-center group"
+                onClick={() => {
+                  loadReminderTime(reminderTarget?.reminderTime || '09:00');
+                  setIsTimeClockPickerOpen(true);
+                }}
+                className="inline-flex flex-col items-center group py-1 px-4 rounded-2xl hover:bg-white/5 transition"
               >
-                <span className="text-3xl font-bold text-white tracking-wider group-hover:text-[#ef5350] transition tabular-nums">
-                  {`${tempReminderHour.padStart(2, '0')}:${tempReminderMinute.padStart(2, '0')}`}
+                <span className="text-3xl sm:text-4xl font-bold text-white tracking-wider group-hover:text-[#ef5350] transition tabular-nums">
+                  {`${tempReminderHour.padStart(2, '0')}:${tempReminderMinute.padStart(2, '0')} ${tempReminderPeriod}`}
                 </span>
-                <span className="text-[11px] text-[#ef5350] mt-0.5">Reminder time</span>
+                <span className="text-[11px] text-[#ef5350] font-medium mt-1 flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Tap to change time
+                </span>
               </button>
             </div>
 
             <div className="p-4 border-b border-[#25252b] space-y-2.5">
-              <div className="text-[11px] font-medium text-[#ef5350]">Reminder type</div>
-              <div className="grid grid-cols-3 rounded-xl bg-[#222227] p-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#ef5350]">Reminder type</div>
+              <div className="grid grid-cols-3 rounded-xl bg-[#222227] p-1 gap-1">
                 {[
-                  { id: 'none', label: "Don't remind", icon: Bell },
+                  { id: 'none', label: "Don't Remind", icon: Bell },
                   { id: 'notification', label: 'Notification', icon: Bell },
                   { id: 'alarm', label: 'Alarm', icon: Clock },
                 ].map((item) => {
                   const Icon = item.icon;
-                  const active = newTaskReminderType === item.id;
+                  const active = reminderTarget?.reminderType === item.id;
                   return (
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setNewTaskReminderType(item.id)}
-                      className={`py-2 px-1 rounded-lg flex flex-col items-center gap-1 text-[10px] font-medium transition ${
+                      onClick={() => updateReminderTarget({ reminderType: item.id })}
+                      className={`min-h-[44px] py-2 px-1 rounded-lg flex flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
                         active
-                          ? 'bg-[#3b2328] text-[#ef5350]'
-                          : 'text-gray-400 hover:text-gray-200'
+                          ? 'bg-[#ef5350] text-white shadow-md shadow-red-500/20'
+                          : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                       }`}
                     >
                       <Icon className="w-3.5 h-3.5" />
@@ -9396,48 +10046,103 @@ useEffect(() => {
               </div>
             </div>
 
-            <div className="p-4 space-y-2.5">
-              <div className="text-[11px] font-medium text-[#ef5350]">Reminder schedule</div>
-              {[
-                { id: 'always', label: 'Always enabled' },
-                { id: 'weekdays', label: 'Specific days of the week' },
-                { id: 'daysBefore', label: 'Days before' },
-              ].map((opt) => {
-                const selected = newTaskReminderSchedule === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setNewTaskReminderSchedule(opt.id)}
-                    className="w-full flex items-center gap-2.5 py-1 text-left text-xs text-gray-200 hover:text-white transition"
-                  >
-                    <span
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        selected ? 'border-[#ef5350]' : 'border-gray-500'
+            <div className="p-4 space-y-3 max-h-[50vh] overflow-y-auto">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#ef5350]">Reminder schedule</div>
+              <div className="space-y-1.5">
+                {[
+                  { id: 'always', label: 'Always Enabled (Daily)' },
+                  { id: 'weekdays', label: 'Specific Days of the Week' },
+                  { id: 'date', label: 'Specific Calendar Date' },
+                ].map((opt) => {
+                  const selected = reminderTarget?.reminderSchedule === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateReminderTarget({ reminderSchedule: opt.id })}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition text-left text-xs ${
+                        selected
+                          ? 'bg-[#252530] border-[#ef5350] text-white font-medium'
+                          : 'bg-[#1c1c22] border-[#2c2c36] text-gray-300 hover:border-gray-500'
                       }`}
                     >
-                      {selected && <span className="w-2 h-2 rounded-full bg-[#ef5350]" />}
-                    </span>
-                    <span>{opt.label}</span>
-                  </button>
-                );
-              })}
+                      <span
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                          selected ? 'border-[#ef5350]' : 'border-gray-500'
+                        }`}
+                      >
+                        {selected && <span className="w-2 h-2 rounded-full bg-[#ef5350]" />}
+                      </span>
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* SPECIFIC DAYS OF THE WEEK - MULTI-SELECT WITH CURRENT WEEK DATES */}
+              {reminderTarget?.reminderSchedule === 'weekdays' && (
+                <div className="space-y-2 pt-1 border-t border-[#25252b]">
+                  <div className="flex items-center justify-between text-[11px] text-gray-400 mb-1">
+                    <span className="font-semibold uppercase tracking-wider text-gray-300">Select Weekdays</span>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => updateReminderTarget({ reminderWeekdays: [1, 2, 3, 4, 5] })} className="text-[10px] text-[#ef5350] hover:underline">Mon–Fri</button>
+                      <button type="button" onClick={() => updateReminderTarget({ reminderWeekdays: [0, 1, 2, 3, 4, 5, 6] })} className="text-[10px] text-[#ef5350] hover:underline">All</button>
+                      <button type="button" onClick={() => updateReminderTarget({ reminderWeekdays: [] })} className="text-[10px] text-gray-400 hover:underline">Clear</button>
+                    </div>
+                  </div>
+                  <WeekdaySelector
+                    selected={reminderTarget?.reminderWeekdays ?? []}
+                    onChange={(sel) => updateReminderTarget({ reminderWeekdays: sel })}
+                  />
+                </div>
+              )}
+
+              {/* SPECIFIC CALENDAR DATE REMINDER */}
+              {reminderTarget?.reminderSchedule === 'date' && (
+                <div className="pt-1 space-y-2 border-t border-[#25252b]">
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-300">
+                    Reminder Date
+                    <input
+                      type="date"
+                      value={reminderTarget.reminderDate || ''}
+                      onChange={(event) => updateReminderTarget({ reminderDate: event.target.value })}
+                      className="mt-1.5 w-full rounded-xl border border-[#34343c] bg-[#222227] px-3.5 py-2.5 text-xs text-white outline-none focus:border-[#ef5350]"
+                    />
+                  </label>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => updateReminderTarget({ reminderDate: todayStr })}
+                      className="px-2.5 py-1 rounded-lg bg-[#24242d] hover:bg-[#30303a] text-[11px] text-gray-300"
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateReminderTarget({ reminderDate: tomorrowStr })}
+                      className="px-2.5 py-1 rounded-lg bg-[#24242d] hover:bg-[#30303a] text-[11px] text-gray-300"
+                    >
+                      Tomorrow
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 border-t border-[#25252b] text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setIsReminderModalOpen(false)}
-                className="py-3 text-center text-gray-300 hover:bg-white/5 border-r border-[#25252b] transition"
+                className="py-3.5 text-center text-gray-400 hover:text-white hover:bg-white/5 border-r border-[#25252b] transition"
               >
                 CANCEL
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  const formatted = `${tempReminderHour.padStart(2, '0')}:${tempReminderMinute.padStart(2, '0')}`;
+                  const formatted = getReminderTime24();
                   const effectiveType =
-                    newTaskReminderType === 'none' ? 'notification' : newTaskReminderType;
+                    reminderTarget?.reminderType === 'none' ? 'notification' : (reminderTarget?.reminderType || 'notification');
                   if (reminderModalContext === 'addProject') {
                     setNewProjectReminderTime(formatted);
                     setNewProjectReminderType(effectiveType);
@@ -9447,15 +10152,22 @@ useEffect(() => {
                       reminderTime: formatted,
                       reminderType: effectiveType,
                     });
+                  } else if (reminderModalContext === 'projectSchedule' && schedulingProject) {
+                    setSchedulingProject({
+                      ...schedulingProject,
+                      reminderTime: formatted,
+                      startTime: formatted,
+                      reminderType: effectiveType,
+                    });
                   } else {
                     setNewTaskReminderTime(formatted);
                     setNewTaskReminderType(effectiveType);
                     setNewTaskReminderAlarm(effectiveType === 'alarm');
                   }
                   setIsReminderModalOpen(false);
-                  showToast(`Reminder set for ${formatted}`);
+                  showToast(`Reminder configured for ${formatted}`);
                 }}
-                className="py-3 text-center text-[#ef5350] hover:bg-white/5 transition"
+                className="py-3.5 text-center text-[#ef5350] hover:bg-white/5 transition font-bold"
               >
                 CONFIRM
               </button>
@@ -9464,87 +10176,356 @@ useEffect(() => {
         </div>
       )}
 
-      {/* DIGITAL HOUR : MINUTE PICKER MODAL */}
+      {/* ==================================================================== */}
+      {/* POLISHED CUSTOM CLOCK & TIME PICKER (DARK THEME, MOBILE & DESKTOP)   */}
+      {/* ==================================================================== */}
       {isTimeClockPickerOpen && (
         <div
           onClick={() => setIsTimeClockPickerOpen(false)}
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 max-sm:items-end max-sm:p-0"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[260px] rounded-2xl bg-[#1c1c20] border border-[#32323a] p-5 shadow-2xl space-y-4"
+            className="w-full max-w-sm rounded-3xl bg-[#1a1a20] border border-[#32323e] p-5 sm:p-6 shadow-2xl space-y-4 max-sm:rounded-b-none"
           >
-            <div className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase">
-              REMINDER TIME
+            <div className="flex items-center justify-between text-xs font-semibold tracking-wider text-gray-400 uppercase">
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-[#ef5350]" />
+                Select Time
+              </span>
+              <span className="text-[11px] text-gray-500 lowercase">12-hour format</span>
             </div>
 
-            <div className="flex items-center justify-center gap-2">
-              <div className="flex flex-col items-center">
-                <input
-                  type="number"
-                  min="0"
-                  max="23"
-                  value={tempReminderHour}
-                  onChange={(e) => {
-                    const v = Math.max(0, Math.min(23, Number(e.target.value) || 0));
-                    setTempReminderHour(String(v).padStart(2, '0'));
-                  }}
-                  className="w-20 h-16 rounded-xl bg-[#3b2328] border-2 border-[#ef5350] text-center text-3xl font-semibold text-white focus:outline-none tabular-nums"
-                />
-                <span className="text-[10px] text-gray-400 mt-1">Hour</span>
-              </div>
+            {/* Clear Selected-Time Display Header */}
+            <div className="flex items-center justify-center gap-3 py-2 bg-[#22222a] rounded-2xl border border-[#2e2e38] p-3">
+              <button
+                type="button"
+                onClick={() => setTimePickerMode('hours')}
+                className={`min-w-[68px] h-16 rounded-xl flex items-center justify-center text-3xl sm:text-4xl font-bold transition tabular-nums ${
+                  timePickerMode === 'hours'
+                    ? 'bg-[#3b2328] border-2 border-[#ef5350] text-white shadow-lg shadow-red-500/20'
+                    : 'bg-[#18181c] border border-[#34343e] text-gray-300 hover:text-white'
+                }`}
+              >
+                {tempReminderHour.padStart(2, '0')}
+              </button>
 
-              <span className="text-3xl font-bold text-gray-300 pb-4">:</span>
+              <span className="text-3xl font-bold text-gray-400 pb-1">:</span>
 
-              <div className="flex flex-col items-center">
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  value={tempReminderMinute}
-                  onChange={(e) => {
-                    const v = Math.max(0, Math.min(59, Number(e.target.value) || 0));
-                    setTempReminderMinute(String(v).padStart(2, '0'));
-                  }}
-                  className="w-20 h-16 rounded-xl bg-[#27272d] border border-[#383842] text-center text-3xl font-semibold text-gray-200 focus:outline-none focus:border-[#ef5350] tabular-nums"
-                />
-                <span className="text-[10px] text-gray-400 mt-1">Minute</span>
+              <button
+                type="button"
+                onClick={() => setTimePickerMode('minutes')}
+                className={`min-w-[68px] h-16 rounded-xl flex items-center justify-center text-3xl sm:text-4xl font-bold transition tabular-nums ${
+                  timePickerMode === 'minutes'
+                    ? 'bg-[#3b2328] border-2 border-[#ef5350] text-white shadow-lg shadow-red-500/20'
+                    : 'bg-[#18181c] border border-[#34343e] text-gray-300 hover:text-white'
+                }`}
+              >
+                {tempReminderMinute.padStart(2, '0')}
+              </button>
+
+              {/* AM / PM Selector */}
+              <div className="flex flex-col gap-1.5 ml-2">
+                {['AM', 'PM'].map((period) => (
+                  <button
+                    key={period}
+                    type="button"
+                    onClick={() => setTempReminderPeriod(period)}
+                    className={`min-h-[32px] px-3 rounded-lg text-xs font-bold transition ${
+                      tempReminderPeriod === period
+                        ? 'bg-[#ef5350] text-white shadow'
+                        : 'bg-[#18181c] border border-[#34343e] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {period}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-              {['06:00', '09:00', '12:00', '17:00', '20:00'].map((preset) => (
+            {/* Segment Title & Mode Switcher */}
+            <div className="flex items-center justify-between text-xs px-1">
+              <span className="font-medium text-gray-300">
+                {timePickerMode === 'hours' ? 'Choose Hour (1 - 12)' : 'Choose Minute (00 - 59)'}
+              </span>
+              <div className="flex items-center gap-1.5">
                 <button
-                  key={preset}
                   type="button"
                   onClick={() => {
-                    const [hh, mm] = preset.split(':');
-                    setTempReminderHour(hh);
-                    setTempReminderMinute(mm);
+                    if (timePickerMode === 'hours') {
+                      const cur = Number(tempReminderHour) || 12;
+                      const next = cur <= 1 ? 12 : cur - 1;
+                      setTempReminderHour(String(next).padStart(2, '0'));
+                    } else {
+                      const cur = Number(tempReminderMinute) || 0;
+                      const next = cur <= 0 ? 59 : cur - 1;
+                      setTempReminderMinute(String(next).padStart(2, '0'));
+                    }
                   }}
-                  className="px-2 py-0.5 rounded bg-[#26262c] hover:bg-[#32323a] text-[10px] text-gray-300"
+                  className="px-2 py-1 rounded bg-[#24242d] hover:bg-[#30303c] text-xs text-gray-300"
                 >
-                  {preset}
+                  -1
                 </button>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <Clock className="w-4 h-4 text-gray-400" />
-              <div className="flex items-center gap-4 text-xs font-semibold">
                 <button
                   type="button"
-                  onClick={() => setIsTimeClockPickerOpen(false)}
-                  className="text-gray-400 hover:text-white transition"
+                  onClick={() => {
+                    if (timePickerMode === 'hours') {
+                      const cur = Number(tempReminderHour) || 12;
+                      const next = cur >= 12 ? 1 : cur + 1;
+                      setTempReminderHour(String(next).padStart(2, '0'));
+                    } else {
+                      const cur = Number(tempReminderMinute) || 0;
+                      const next = cur >= 59 ? 0 : cur + 1;
+                      setTempReminderMinute(String(next).padStart(2, '0'));
+                    }
+                  }}
+                  className="px-2 py-1 rounded bg-[#24242d] hover:bg-[#30303c] text-xs text-gray-300"
+                >
+                  +1
+                </button>
+              </div>
+            </div>
+
+            {/* Hour Mode Grid (1 to 12) */}
+            {timePickerMode === 'hours' && (
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((h) => {
+                  const hStr = String(h).padStart(2, '0');
+                  const isSelected = String(Number(tempReminderHour)) === String(h);
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => {
+                        setTempReminderHour(hStr);
+                        // Auto switch to minutes for quick entry
+                        setTimePickerMode('minutes');
+                      }}
+                      className={`min-h-[44px] rounded-xl border text-sm font-semibold transition tabular-nums ${
+                        isSelected
+                          ? 'bg-[#ef5350] border-[#ef5350] text-white shadow-md shadow-red-500/20'
+                          : 'bg-[#22222a] border-[#2e2e38] text-gray-200 hover:border-gray-500 hover:text-white'
+                      }`}
+                    >
+                      {h}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Minute Mode Grid (:00, :05, :10, :15, :20, :25, :30, :35, :40, :45, :50, :55) */}
+            {timePickerMode === 'minutes' && (
+              <div className="grid grid-cols-4 gap-2">
+                {['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((m) => {
+                  const isSelected = tempReminderMinute === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setTempReminderMinute(m)}
+                      className={`min-h-[44px] rounded-xl border text-sm font-semibold transition tabular-nums ${
+                        isSelected
+                          ? 'bg-[#ef5350] border-[#ef5350] text-white shadow-md shadow-red-500/20'
+                          : 'bg-[#22222a] border-[#2e2e38] text-gray-200 hover:border-gray-500 hover:text-white'
+                      }`}
+                    >
+                      :{m}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Quick Common Presets Chips */}
+            <div className="pt-1 border-t border-[#2a2a34]">
+              <div className="text-[10px] text-gray-400 font-medium mb-1.5">Quick Presets:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: '08:00 AM', time: '08:00' },
+                  { label: '09:00 AM', time: '09:00' },
+                  { label: '12:00 PM', time: '12:00' },
+                  { label: '03:00 PM', time: '15:00' },
+                  { label: '06:00 PM', time: '18:00' },
+                  { label: '09:00 PM', time: '21:00' },
+                ].map((p) => (
+                  <button
+                    key={p.time}
+                    type="button"
+                    onClick={() => loadReminderTime(p.time)}
+                    className="px-2.5 py-1 rounded-lg bg-[#22222a] hover:bg-[#2c2c36] border border-[#2e2e38] text-[11px] text-gray-300 hover:text-white transition"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions: Cancel & OK */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#2a2a34]">
+              <button
+                type="button"
+                onClick={() => setIsTimeClockPickerOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-transparent hover:bg-white/5 border border-gray-600 text-xs font-semibold text-gray-300 hover:text-white transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const formatted = getReminderTime24();
+                  if (reminderModalContext === 'editProject' && editingProject) {
+                    setEditingProject({
+                      ...editingProject,
+                      startTime: formatted,
+                      reminderTime: formatted,
+                    });
+                  } else if (reminderModalContext === 'addProject') {
+                    setNewProjectStartTime(formatted);
+                    setNewProjectReminderTime(formatted);
+                  } else if (reminderModalContext === 'projectSchedule' && schedulingProject) {
+                    setSchedulingProject({
+                      ...schedulingProject,
+                      startTime: formatted,
+                      reminderTime: formatted,
+                    });
+                  }
+                  setIsTimeClockPickerOpen(false);
+                }}
+                className="px-6 py-2.5 rounded-xl bg-[#ef5350] hover:bg-[#e53935] text-xs font-bold text-white transition shadow-lg shadow-red-500/20"
+              >
+                Confirm Time
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* DEDICATED PROJECT START SCHEDULING MODAL (CALENDAR DATE & TIME)      */}
+      {/* ==================================================================== */}
+      {isProjectScheduleModalOpen && schedulingProject && (
+        <div
+          onClick={() => setIsProjectScheduleModalOpen(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 max-sm:items-end max-sm:p-0"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-3xl bg-[#18181c] border border-[#2e2e38] p-5 sm:p-6 shadow-2xl space-y-4 max-sm:rounded-b-none"
+          >
+            <div className="flex items-center justify-between border-b border-[#26262e] pb-3">
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-full shrink-0"
+                  style={{ backgroundColor: schedulingProject.color }}
+                />
+                <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
+                  {schedulingProject.name}
+                </h3>
+              </div>
+              <span className="text-[10px] font-semibold tracking-wider text-[#ef5350] uppercase">
+                Project Schedule
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs text-gray-300">
+                <span className="font-semibold text-gray-200">Start Date</span>
+                <input
+                  type="date"
+                  value={schedulingProject.startDate || schedulingProject.reminderDate || todayStr}
+                  onChange={(e) => {
+                    setSchedulingProject({
+                      ...schedulingProject,
+                      startDate: e.target.value,
+                      reminderDate: e.target.value,
+                      reminderSchedule: 'date',
+                    });
+                  }}
+                  className="mt-1 w-full rounded-xl border border-[#34343c] bg-[#222227] px-3.5 py-2.5 text-xs text-white outline-none focus:border-[#ef5350]"
+                />
+              </label>
+
+              <div>
+                <span className="block text-xs font-semibold text-gray-200 mb-1">Start Time</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReminderModalContext('projectSchedule');
+                    loadReminderTime(schedulingProject.startTime || schedulingProject.reminderTime || '09:00');
+                    setIsTimeClockPickerOpen(true);
+                  }}
+                  className="w-full rounded-xl border border-[#34343c] bg-[#222227] hover:border-gray-500 px-3.5 py-2.5 text-xs text-white flex items-center justify-between transition"
+                >
+                  <span className="tabular-nums font-semibold">
+                    {format12Hour(schedulingProject.startTime || schedulingProject.reminderTime || '09:00')}
+                  </span>
+                  <Clock className="w-4 h-4 text-[#ef5350]" />
+                </button>
+              </div>
+
+              {/* Schedule Preview */}
+              {(schedulingProject.startDate || schedulingProject.reminderDate) && (
+                <div className="p-3 rounded-xl bg-[#202028] border border-[#2c2c38] text-xs text-gray-300 space-y-1">
+                  <div className="font-medium text-white flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Scheduled to start:</span>
+                  </div>
+                  <div className="text-gray-400 pl-5">
+                    {formatFullDate(schedulingProject.startDate || schedulingProject.reminderDate)} at{' '}
+                    {format12Hour(schedulingProject.startTime || schedulingProject.reminderTime || '09:00')}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-[#26262e]">
+              {(schedulingProject.startDate || schedulingProject.reminderDate) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleClearProjectSchedule(schedulingProject.id);
+                    setIsProjectScheduleModalOpen(false);
+                  }}
+                  className="text-xs text-red-400 hover:text-red-300 transition"
+                >
+                  Remove Schedule
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsProjectScheduleModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-transparent hover:bg-white/5 border border-gray-600 text-xs text-gray-300 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsTimeClockPickerOpen(false)}
-                  className="text-[#ef5350] hover:text-[#f87171] transition"
+                  onClick={() => {
+                    const sDate = schedulingProject.startDate || schedulingProject.reminderDate || todayStr;
+                    const sTime = schedulingProject.startTime || schedulingProject.reminderTime || '09:00';
+                    setProjects((prev) =>
+                      prev.map((p) => {
+                        if (p.id !== schedulingProject.id) return p;
+                        return {
+                          ...p,
+                          startDate: sDate,
+                          startTime: sTime,
+                          reminderDate: sDate,
+                          reminderTime: sTime,
+                          reminderType: p.reminderType === 'none' ? 'notification' : p.reminderType,
+                          reminderSchedule: 'date',
+                        };
+                      })
+                    );
+                    setIsProjectScheduleModalOpen(false);
+                    showToast(`Scheduled "${schedulingProject.name}" for ${formatFullDate(sDate)} at ${format12Hour(sTime)}`);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-[#ef5350] hover:bg-[#e53935] text-xs font-semibold text-white transition shadow"
                 >
-                  OK
+                  Confirm Schedule
                 </button>
               </div>
             </div>
@@ -9720,11 +10701,19 @@ useEffect(() => {
             <h4 className="text-center text-sm font-medium text-gray-100 mb-1">
               Focus Time Goal
             </h4>
-            <p className="text-center text-[11px] text-gray-400 mb-3">
-              {activeFilter === 'today'
-                ? `Date: ${selectedWorkspaceDateStr} (Max 18h)`
-                : `${activeViewMeta.title} (Max 18h)`}
-            </p>
+            <div className="text-center text-[11px] text-gray-400 mb-3 leading-snug">
+              {activeFilter.startsWith('proj-') ? (
+                <>
+                  <span className="text-white font-medium">{activeViewMeta.title}</span>
+                  <br />
+                  <span>Date: {formatShortDateLabel(selectedWorkspaceDateStr)} (Max 18h)</span>
+                </>
+              ) : activeFilter === 'today' ? (
+                <span>Date: {selectedWorkspaceDateStr} (Max 18h)</span>
+              ) : (
+                <span>{activeViewMeta.title} (Max 18h)</span>
+              )}
+            </div>
 
             <div className="relative rounded-xl bg-[#34343b] py-2 px-3 flex flex-col items-center justify-center select-none overflow-hidden">
               {[-2, -1, 0, 1, 2].map((offset) => {
@@ -9751,6 +10740,24 @@ useEffect(() => {
               })}
             </div>
 
+            {/* Quick Goal Preset Chips */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3">
+              {[1, 2, 3, 4, 5, 6, 8].map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setTempGoalHours(h)}
+                  className={`px-2 py-0.5 rounded-md text-[11px] transition ${
+                    tempGoalHours === h
+                      ? 'bg-[#ef5350] text-white font-semibold'
+                      : 'bg-white/5 hover:bg-white/10 text-gray-300'
+                  }`}
+                >
+                  {h}h
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center justify-between gap-3 mt-4">
               <button
                 type="button"
@@ -9773,8 +10780,9 @@ useEffect(() => {
                     }
                     showToast(`Goal for ${selectedWorkspaceDateStr} set to ${clamped}h`);
                   } else if (activeFilter.startsWith('proj-')) {
-                    setTabGoals((prev) => ({ ...prev, [activeFilter]: clamped }));
-                    showToast(`${activeViewMeta.title} Goal set to ${clamped}h`);
+                    const projectDateKey = `${activeFilter}:${selectedWorkspaceDateStr}`;
+                    setDateGoals((prev) => ({ ...prev, [projectDateKey]: clamped }));
+                    showToast(`${activeViewMeta.title} goal for ${selectedWorkspaceDateStr} set to ${clamped}h`);
                   } else {
                     setSettings((prev) => ({ ...prev, dailyGoalHours: clamped }));
                     showToast(`Daily Focus Goal updated to ${clamped}h`);
@@ -10637,7 +11645,7 @@ useEffect(() => {
                                   ti.checked ? 'line-through text-gray-500' : 'text-gray-300'
                                 }`}
                               >
-                                <span>{ti.checked ? 'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“' : 'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â'}</span>
+                                <span>{ti.checked ? '☑' : '☐'}</span>
                                 <span className="truncate">{ti.text}</span>
                               </div>
                             ))}
@@ -11021,7 +12029,7 @@ useEffect(() => {
           {
             id: 'bronze',
             name: 'Bronze Medal',
-            rule: '2h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 5h in a day',
+            rule: '2h – 5h in a day',
             count: streakAndAchievements.bronzeCount,
             color: '#ef5350',
             bg: 'rgba(239, 83, 80, 0.14)',
@@ -11029,7 +12037,7 @@ useEffect(() => {
           {
             id: 'silver',
             name: 'Silver Medal',
-            rule: '5h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 8h in a day',
+            rule: '5h – 8h in a day',
             count: streakAndAchievements.silverCount,
             color: '#9ca3af',
             bg: 'rgba(156, 163, 175, 0.14)',
@@ -11037,7 +12045,7 @@ useEffect(() => {
           {
             id: 'gold',
             name: 'Gold Medal',
-            rule: '8h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 12h in a day',
+            rule: '8h – 12h in a day',
             count: streakAndAchievements.goldCount,
             color: '#eab308',
             bg: 'rgba(234, 179, 8, 0.14)',
@@ -11045,7 +12053,7 @@ useEffect(() => {
           {
             id: 'uranium',
             name: 'Uranium Medal',
-            rule: '12h ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ 15h in a day',
+            rule: '12h – 15h in a day',
             count: streakAndAchievements.uraniumCount,
             color: '#22c55e',
             bg: 'rgba(34, 197, 94, 0.14)',
@@ -11215,7 +12223,7 @@ useEffect(() => {
                               >
                                 <div
                                   title={`${d.dateStr}: ${formatHoursMins(d.mins).text}${
-                                    medal ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${medal.label} Medal (${medal.range})` : ''
+                                    medal ? ` • ${medal.label} Medal (${medal.range})` : ''
                                   }`}
                                   style={{
                                     borderColor: medal
@@ -11303,7 +12311,7 @@ useEffect(() => {
                             >
                               <div
                                 title={`${c.dateStr}: ${formatHoursMins(c.mins).text}${
-                                  medal ? ` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${medal.label} Medal (${medal.range})` : ''
+                                  medal ? ` • ${medal.label} Medal (${medal.range})` : ''
                                 }`}
                                 style={{
                                   borderColor:
@@ -11523,7 +12531,7 @@ useEffect(() => {
                               soundEngine.playAlarm(settings.focusAlarm || 'Alien Fanfare');
                             } else {
                               showToast(
-                                `Reach a ${daysTarget}-day continuous study streak (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥15m/day) to unlock!`
+                                `Reach a ${daysTarget}-day continuous study streak (≥15m/day) to unlock!`
                               );
                             }
                           }}
@@ -11544,7 +12552,7 @@ useEffect(() => {
                                   : 'bg-[#2b2b33] text-gray-400'
                               }`}
                             >
-                              ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â{particularMedalTotal}
+                              ×{particularMedalTotal}
                             </span>
 
                             {unlocked ? (
@@ -11709,23 +12717,54 @@ useEffect(() => {
               </div>
             )}
 
-            {updateBusy && (
-              <div className="mb-4">
-                <div className="flex justify-between text-xs text-gray-400 mb-2">
-                  <span>Downloading update...</span>
-                  <span>{updateProgress}%</span>
+            {(updateBusy || updateProgress > 0) && (
+              <div className="mb-4 rounded-xl bg-[#222228] p-3.5 border border-[#2e2e38]">
+                <div className="flex justify-between text-xs text-gray-300 font-medium mb-2">
+                  <span>
+                    {updateStatus === 'verifying' || updateProgress >= 100
+                      ? 'Verifying package integrity...'
+                      : 'Downloading update...'}
+                  </span>
+                  <span className="text-blue-400 font-semibold">{updateProgress}%</span>
                 </div>
                 <div className="h-2 rounded-full bg-[#33333b] overflow-hidden">
                   <div
-                    className="h-full bg-blue-500 transition-all"
-                    style={{ width: updateProgress + '%' }}
+                    className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                    style={{ width: `${updateProgress}%` }}
                   />
+                </div>
+                <div className="flex justify-between items-center text-[11px] text-gray-400 mt-2">
+                  <span>
+                    {updateStatus === 'verifying' || updateProgress >= 100
+                      ? 'Checking SHA-256 digital signature...'
+                      : updateDownloadedBytes > 0 && updateTotalBytes > 0
+                      ? `${(updateDownloadedBytes / (1024 * 1024)).toFixed(1)} MB / ${(updateTotalBytes / (1024 * 1024)).toFixed(1)} MB`
+                      : `Downloading... ${updateProgress}%`}
+                  </span>
+                  {updateTotalBytes > 0 && updateDownloadedBytes > 0 && (
+                    <span className="text-gray-500 font-mono text-[10px]">
+                      {Math.round((updateDownloadedBytes / updateTotalBytes) * 100)}%
+                    </span>
+                  )}
                 </div>
               </div>
             )}
 
-            {updateMessage && (
-              <p className="text-xs text-blue-300 mb-3">{updateMessage}</p>
+            {updateStatus === 'complete' && updateMessage && (
+              <div className="mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-emerald-300">{updateMessage}</p>
+              </div>
+            )}
+
+            {updateError && (
+              <div className="mb-4 rounded-xl bg-red-500/10 border border-red-500/20 p-3 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-red-300 space-y-1">
+                  <p className="font-semibold">Update encountered an issue</p>
+                  <p className="text-red-300/90">{updateError}</p>
+                </div>
+              </div>
             )}
 
             <button
@@ -11734,26 +12773,53 @@ useEffect(() => {
               onClick={async () => {
                 setUpdateBusy(true);
                 setUpdateProgress(0);
+                setUpdateStatus('downloading');
+                setUpdateError('');
                 setUpdateMessage('');
 
                 try {
                   const result = await downloadAndInstallUpdate(availableUpdate);
 
                   if (result?.permissionRequired) {
-                    setUpdateMessage('Enable "Allow from this source" in Android settings, return here, and tap Install Update again.');
+                    setUpdateStatus('error');
+                    setUpdateError('Android requires "Install unknown apps" permission for FocusToDoPro. Please enable it in Settings, then tap Retry.');
+                  } else if (result?.started) {
+                    setUpdateStatus('complete');
+                    setUpdateMessage('Update downloaded and verified. Restarting FocusToDoPro to finish update...');
                   } else {
-                    setUpdateMessage('Download complete. Follow the Android installer instructions to finish updating.');
+                    setUpdateStatus('complete');
+                    setUpdateMessage('Update downloaded and verified. Follow the on-screen installer to finish updating.');
                   }
                 } catch (error) {
-                  setUpdateMessage(error?.message || 'Update failed. Please try again.');
+                  setUpdateStatus('error');
+                  setUpdateError(error?.message || 'Update failed. Please check network connection and try again.');
                 } finally {
                   setUpdateBusy(false);
                 }
               }}
-              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-sm flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-sm flex items-center justify-center gap-2 transition"
             >
-              <Download className="w-4 h-4" />
-              {updateBusy ? 'Downloading...' : 'Download & Install Update'}
+              {updateBusy ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Downloading... ({updateProgress}%)</span>
+                </>
+              ) : updateStatus === 'error' ? (
+                <>
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Retry Download & Install</span>
+                </>
+              ) : updateStatus === 'complete' ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Update In Progress...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>Download & Install Update</span>
+                </>
+              )}
             </button>
 
             <button
@@ -11761,9 +12827,12 @@ useEffect(() => {
               disabled={updateBusy}
               onClick={() => {
                 setAvailableUpdate(null);
+                setUpdateStatus('idle');
+                setUpdateError('');
                 setUpdateMessage('');
+                setUpdateProgress(0);
               }}
-              className="w-full py-2.5 mt-2 rounded-xl text-gray-400 hover:text-white text-sm disabled:opacity-50"
+              className="w-full py-2.5 mt-2 rounded-xl text-gray-400 hover:text-white text-sm disabled:opacity-50 transition"
             >
               Remind Me Later
             </button>

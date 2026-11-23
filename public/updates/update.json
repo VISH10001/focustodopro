@@ -1,7 +1,7 @@
 ﻿{
-    "apkUrl":  "https://github.com/VISH10001/focustodopro/releases/download/v1.0.3/focustodopro.apk",
-    "sha256":  "1F3DCD5410636062E056B1CFF7CDA188DC046B419F13CBB847EDEB2FBEFB5FC8",
-    "versionCode":  5,
-    "versionName":  "1.0.3",
-    "releaseNotes":  "FocusToDoPro Android 1.0.3 - Bug fixes and improvements."
+  "apkUrl": "https://focustodopro.vercel.app/updates/focustodopro.apk",
+  "sha256": "655DCC2676AB9686EF125FD89D15A2043C2EBBE3060DD2A6E07D1D53F66B2B03",
+  "versionCode": 5,
+  "versionName": "1.0.3",
+  "releaseNotes": "FocusToDoPro Android 1.0.3 - Bug fixes, custom clock, responsive reminder schedule, and performance improvements."
 }
