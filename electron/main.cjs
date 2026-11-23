@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 let mainWindow = null;
+let isUpdating = false;
 
 const isPortable =
   Boolean(process.env.PORTABLE_EXECUTABLE_DIR) ||
@@ -45,16 +46,68 @@ autoUpdater.on('error', (error) => {
   console.error('Windows auto-updater error:', error);
 });
 
+autoUpdater.on('before-quit-for-update', () => {
+  isUpdating = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.removeAllListeners('close');
+    mainWindow.destroy();
+    mainWindow = null;
+  }
+});
+
 ipcMain.handle('download-and-install-update', async () => {
   if (!app.isPackaged || process.platform !== 'win32' || isPortable) {
     throw new Error('Automatic updates are available in the installed Windows version only.');
   }
 
+  if (isUpdating) {
+    return { started: true };
+  }
+
   try {
+    // 1. Download the update package
     await autoUpdater.downloadUpdate();
-    autoUpdater.quitAndInstall(false, true);
+
+    // 2. Mark app as in dedicated update installation shutdown state
+    isUpdating = true;
+
+    // 3. Notify renderer of final download state
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-download-progress', {
+        progress: 100,
+        status: 'installing',
+      });
+    }
+
+    // 4. Schedule clean teardown and install
+    setTimeout(() => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          // Bypass close-to-tray or any close preventDefault
+          mainWindow.removeAllListeners('close');
+          mainWindow.destroy();
+          mainWindow = null;
+        }
+      } catch (err) {
+        console.error('Error destroying window before update:', err);
+      }
+
+      try {
+        // Trigger installer launch
+        autoUpdater.quitAndInstall(false, true);
+      } catch (installErr) {
+        console.error('quitAndInstall error:', installErr);
+      }
+
+      // Guarantee the Electron process and all Chromium children terminate promptly
+      setTimeout(() => {
+        app.exit(0);
+      }, 600);
+    }, 400);
+
     return { started: true };
   } catch (error) {
+    isUpdating = false;
     console.error('Windows update download/install failed:', error);
     throw new Error(error.message || 'Windows update download failed.');
   }
@@ -106,6 +159,14 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  if (isUpdating && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.removeAllListeners('close');
+    mainWindow.destroy();
+    mainWindow = null;
+  }
 });
 
 app.on('window-all-closed', () => {

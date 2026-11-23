@@ -9,6 +9,11 @@ import {
   sendPasswordResetEmail,
   updateUserPassword,
 } from './auth';
+import {
+  checkForAppUpdate,
+  downloadAndInstallUpdate,
+  addUpdateDownloadListener,
+} from './appUpdater';
 
 const withTimeout = (promise, ms, timeoutMessage) => {
   return Promise.race([
@@ -29,6 +34,30 @@ export default function AuthGate({ children }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState(null);
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
+  useEffect(() => {
+    let unmounted = false;
+    checkForAppUpdate()
+      .then((update) => {
+        if (!unmounted && update) setAvailableUpdate(update);
+      })
+      .catch(() => {});
+    return () => {
+      unmounted = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const sub = addUpdateDownloadListener((progress) => {
+      setUpdateProgress(progress?.progress ?? 0);
+    });
+    return () => sub?.remove?.();
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
@@ -170,6 +199,80 @@ export default function AuthGate({ children }) {
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#ffb14a] via-[#ff6d59] to-[#7d43e8] grid place-items-center mx-auto mb-5 shadow-lg shadow-violet-500/20 text-xl font-bold">✓</div>
         <h1 className="text-3xl font-bold text-center tracking-tight">FocusToDoPro</h1>
         <p className="text-slate-400 text-center mt-2 mb-7">{subtitle}</p>
+
+        {availableUpdate && !updateDismissed && (
+          <div className="mb-6 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4 text-left shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🚀</span>
+                <div>
+                  <p className="text-xs font-bold text-blue-200">
+                    FocusToDoPro {availableUpdate.versionName} Available
+                  </p>
+                  <p className="text-[11px] text-blue-300/80">
+                    Update now or sign in to update later.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={updateBusy}
+                onClick={() => setUpdateDismissed(true)}
+                className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded"
+                title="Dismiss update banner"
+              >
+                ✕
+              </button>
+            </div>
+
+            {updateBusy && (
+              <div className="mt-3">
+                <div className="flex justify-between text-[11px] text-blue-300 mb-1">
+                  <span>Downloading...</span>
+                  <span>{updateProgress}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-blue-950 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-400 transition-all duration-200"
+                    style={{ width: `${updateProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {updateError && (
+              <p className="mt-2 text-xs text-red-300">{updateError}</p>
+            )}
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={updateBusy}
+                onClick={async () => {
+                  setUpdateBusy(true);
+                  setUpdateError('');
+                  try {
+                    await downloadAndInstallUpdate(availableUpdate);
+                  } catch (err) {
+                    setUpdateError(err?.message || 'Update failed.');
+                    setUpdateBusy(false);
+                  }
+                }}
+                className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 py-2 px-3 text-xs font-semibold text-white transition disabled:opacity-50"
+              >
+                {updateBusy ? `Updating (${updateProgress}%)` : 'Update Now'}
+              </button>
+              <button
+                type="button"
+                disabled={updateBusy}
+                onClick={() => setUpdateDismissed(true)}
+                className="rounded-lg border border-white/10 hover:bg-white/5 py-2 px-3 text-xs text-slate-300 transition"
+              >
+                Remind Later
+              </button>
+            </div>
+          </div>
+        )}
 
         {!isSupabaseConfigured ? (
           <div className="space-y-4">

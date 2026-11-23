@@ -71,7 +71,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     },
     "artifactName": "FocusToDoPro-${version}-${arch}.${ext}",
     "publish": [
