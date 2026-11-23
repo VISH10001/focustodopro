@@ -1,8 +1,8 @@
 version: 1.0.3
 files:
   - url: https://github.com/VISH10001/focustodopro/releases/download/v1.0.3/FocusToDoPro-1.0.3-x64.exe
-    sha512: Dwnr/6eTHJaqcgVaGf9x/jNZkzX7pi0H+hL+2nsX2gh7Gk6fDP7DzuX+YTPP5JxjPOzaLnRPA+DXJnH4YWjSTQ==
-    size: 134479723
+    sha512: hO9iDVupdyMYtkEBH3/IbdOyMdkPqfoIRyKjTcxYkcLVJj9OD7KY7pllo8qQJaKeXVcLPZyGvK3JvC1v52MxkQ==
+    size: 134479731
 path: https://github.com/VISH10001/focustodopro/releases/download/v1.0.3/FocusToDoPro-1.0.3-x64.exe
-sha512: Dwnr/6eTHJaqcgVaGf9x/jNZkzX7pi0H+hL+2nsX2gh7Gk6fDP7DzuX+YTPP5JxjPOzaLnRPA+DXJnH4YWjSTQ==
-releaseDate: '2026-11-23T18:31:29.341Z'
+sha512: hO9iDVupdyMYtkEBH3/IbdOyMdkPqfoIRyKjTcxYkcLVJj9OD7KY7pllo8qQJaKeXVcLPZyGvK3JvC1v52MxkQ==
+releaseDate: '2026-11-23T18:39:33.388Z'

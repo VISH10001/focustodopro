@@ -11,10 +11,13 @@
     IfFileExists "$INSTDIR\FocusToDoPro-new-uninstaller.exe" 0 customInit_done
 
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.previous"
+    ClearErrors
     IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 customInit_no_old
     Rename "$INSTDIR\${UNINSTALL_FILENAME}" "$INSTDIR\${UNINSTALL_FILENAME}.previous"
+    IfErrors customInit_done
 
   customInit_no_old:
+    ClearErrors
     Rename "$INSTDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR\${UNINSTALL_FILENAME}"
     IfErrors customInit_restore_old
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.previous"
