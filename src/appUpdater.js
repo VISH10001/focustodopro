@@ -72,35 +72,8 @@ export async function checkForAppUpdate() {
       releaseNotes: 'LOCAL TEST: FocusToDoPro 1.0.2 update popup display test.'
     };
   }
-  // 3. Web or desktop browser fallback (checking manifest)
-  try {
-    const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
-      cache: 'no-store',
-    });
-    if (!response.ok) {
-      throw new Error(`Update server returned HTTP ${response.status}`);
-    }
-    const update = await response.json();
-    const currentVersion = '1.0.2';
-    if (update.versionName && update.versionName !== currentVersion) {
-      const vRemote = update.versionName.split('.').map(Number);
-      const vLocal = currentVersion.split('.').map(Number);
-      const isNewer =
-        vRemote[0] > vLocal[0] ||
-        (vRemote[0] === vLocal[0] && vRemote[1] > vLocal[1]) ||
-        (vRemote[0] === vLocal[0] && vRemote[1] === vLocal[1] && vRemote[2] > vLocal[2]);
-      if (isNewer) {
-        return {
-          ...update,
-          currentVersion,
-        };
-      }
-    }
-    return null;
-  } catch (err) {
-    if (err.message && err.message.includes('HTTP')) throw err;
-    throw new Error('Network error: Could not reach update server.', { cause: err });
-  }
+  // 3. Web browser: native app updates are not applicable here.
+  return null;
 }
 
 export async function downloadAndInstallUpdate(update) {
@@ -129,4 +102,5 @@ export function addUpdateDownloadListener(callback) {
 
   return { remove: () => {} };
 }
+
 

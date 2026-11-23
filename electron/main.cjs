@@ -10,7 +10,9 @@ const isPortable =
   Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
 
 autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
+// Updates are installed only by the explicit React update action below.
+// Avoid starting a second install automatically during app shutdown.
+autoUpdater.autoInstallOnAppQuit = false;
 
 // React popup is the single update UI for Windows.
 ipcMain.handle('check-for-updates', async () => {
@@ -79,31 +81,11 @@ ipcMain.handle('download-and-install-update', async () => {
       });
     }
 
-    // 4. Schedule clean teardown and install
-    setTimeout(() => {
-      try {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          // Bypass close-to-tray or any close preventDefault
-          mainWindow.removeAllListeners('close');
-          mainWindow.destroy();
-          mainWindow = null;
-        }
-      } catch (err) {
-        console.error('Error destroying window before update:', err);
-      }
-
-      try {
-        // Trigger installer launch
-        autoUpdater.quitAndInstall(false, true);
-      } catch (installErr) {
-        console.error('quitAndInstall error:', installErr);
-      }
-
-      // Guarantee the Electron process and all Chromium children terminate promptly
-      setTimeout(() => {
-        app.exit(0);
-      }, 600);
-    }, 400);
+    // 4. Let electron-updater perform its supported shutdown sequence.
+    // The before-quit-for-update handler above tears down the window and
+    // bypasses any close-to-tray behavior. Do not force app.exit() here:
+    // it can interrupt the installer's normal quit hand-off.
+    autoUpdater.quitAndInstall(false, true);
 
     return { started: true };
   } catch (error) {

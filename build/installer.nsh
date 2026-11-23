@@ -1,39 +1,52 @@
 !macro customCheckAppRunning
   !define UniqueLine ${__LINE__}
 
-  DetailPrint "Checking for running instances of ${PRODUCT_NAME}..."
+  DetailPrint "Preparing safe FocusToDoPro update..."
+
+  ; For the main installer, replace the legacy uninstaller before it is launched.
+  ; Older uninstallers can mistake their own process for the application process.
+  !ifndef BUILD_UNINSTALLER
+    SetOutPath "$PLUGINSDIR"
+    File /oname=FocusToDoPro-new-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
+    CopyFiles /SILENT "$PLUGINSDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR"
+    Delete "$INSTDIR\${UNINSTALL_FILENAME}"
+    Rename "$INSTDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR\${UNINSTALL_FILENAME}"
+    SetOutPath "$INSTDIR"
+  !endif
 
   Push $0
   Push $1
   Push $2
 
-  ; Loop up to 4 times to check and safely close FocusToDoPro.exe
   StrCpy $1 0
 
   check_running_loop_${UniqueLine}:
     IntOp $1 $1 + 1
 
-    ; Exact executable search using tasklist and findstr
-    nsExec::Exec `"$CmdPath" /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
+    ; Search only for the exact application executable name.
+    nsExec::Exec `"$CmdPath" /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /I /C:"${APP_EXECUTABLE_FILENAME}"`
     Pop $0
 
-    ; If tasklist/findstr returned 0, FocusToDoPro.exe is currently running
     ${if} $0 == 0
-      ${if} $1 <= 3
-        DetailPrint `Terminating running ${PRODUCT_NAME} process (attempt $1)...`
-        ; Terminate process tree forcefully without blocking
-        nsExec::Exec `"$CmdPath" /C taskkill /F /T /IM "${APP_EXECUTABLE_FILENAME}"`
-        Pop $2
-        Sleep 800
-        Goto check_running_loop_${UniqueLine}
-      ${else}
-        ; If still running after 3 automatic attempts, prompt the user
-        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${PRODUCT_NAME} is still running. Please close it and click Retry to continue the update." IDRETRY check_running_loop_${UniqueLine}
-        Quit
+      DetailPrint `Closing running ${PRODUCT_NAME} process (attempt $1)...`
+      nsExec::Exec `"$CmdPath" /C taskkill /F /T /IM "${APP_EXECUTABLE_FILENAME}"`
+      Pop $2
+      Sleep 1500
+
+      nsExec::Exec `"$CmdPath" /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /I /C:"${APP_EXECUTABLE_FILENAME}"`
+      Pop $0
+
+      ${if} $0 == 0
+        ${if} $1 < 4
+          Goto check_running_loop_${UniqueLine}
+        ${else}
+          MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${PRODUCT_NAME} is still running. Close it manually, then click Retry." IDRETRY check_running_loop_${UniqueLine}
+          Quit
+        ${endif}
       ${endif}
-    ${else}
-      DetailPrint "${PRODUCT_NAME} is closed."
     ${endif}
+
+  DetailPrint "${PRODUCT_NAME} is closed. Continuing installation."
 
   Pop $2
   Pop $1
