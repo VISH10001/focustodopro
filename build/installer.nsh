@@ -1,18 +1,38 @@
+!macro customInit
+  ; Replace the legacy uninstaller before the install section launches it.
+  ; The normal app-running check can be skipped by the elevated inner installer.
+  !ifndef BUILD_UNINSTALLER
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    File /oname=FocusToDoPro-new-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
+    ClearErrors
+    CopyFiles /SILENT "$PLUGINSDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR"
+    IfErrors customInit_done
+    IfFileExists "$INSTDIR\FocusToDoPro-new-uninstaller.exe" 0 customInit_done
+
+    Delete "$INSTDIR\${UNINSTALL_FILENAME}.previous"
+    IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 customInit_no_old
+    Rename "$INSTDIR\${UNINSTALL_FILENAME}" "$INSTDIR\${UNINSTALL_FILENAME}.previous"
+
+  customInit_no_old:
+    Rename "$INSTDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR\${UNINSTALL_FILENAME}"
+    IfErrors customInit_restore_old
+    Delete "$INSTDIR\${UNINSTALL_FILENAME}.previous"
+    Goto customInit_done
+
+  customInit_restore_old:
+    IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}.previous" 0 customInit_done
+    Rename "$INSTDIR\${UNINSTALL_FILENAME}.previous" "$INSTDIR\${UNINSTALL_FILENAME}"
+
+  customInit_done:
+    SetOutPath "$INSTDIR"
+  !endif
+!macroend
+
 !macro customCheckAppRunning
   !define UniqueLine ${__LINE__}
 
-  DetailPrint "Preparing safe FocusToDoPro update..."
-
-  ; For the main installer, replace the legacy uninstaller before it is launched.
-  ; Older uninstallers can mistake their own process for the application process.
-  !ifndef BUILD_UNINSTALLER
-    SetOutPath "$PLUGINSDIR"
-    File /oname=FocusToDoPro-new-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
-    CopyFiles /SILENT "$PLUGINSDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR"
-    Delete "$INSTDIR\${UNINSTALL_FILENAME}"
-    Rename "$INSTDIR\FocusToDoPro-new-uninstaller.exe" "$INSTDIR\${UNINSTALL_FILENAME}"
-    SetOutPath "$INSTDIR"
-  !endif
+  DetailPrint "Checking for running instances of ${PRODUCT_NAME}..."
 
   Push $0
   Push $1
